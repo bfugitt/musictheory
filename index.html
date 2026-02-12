@@ -1,0 +1,2146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Organic Music Theory</title>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Babel -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- VexFlow (Music Notation) -->
+    <script src="https://unpkg.com/vexflow@4.2.2/build/cjs/vexflow.js"></script>
+    
+    <!-- Tone.js (Audio) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Quicksand', sans-serif;
+            background-color: #FDFBF7;
+            color: #4A4A4A;
+        }
+        
+        h1, h2, h3, .handwritten {
+            font-family: 'Patrick Hand', cursive;
+        }
+
+        /* Reggio Palette */
+        .bg-sage { background-color: #8CAE97; }
+        .bg-sage-dark { background-color: #6B8E76; }
+        .text-sage-dark { color: #557560; }
+        
+        .bg-clay { background-color: #D4A373; }
+        .bg-clay-dark { background-color: #B0825B; }
+        
+        .bg-sand { background-color: #FAEDCD; }
+        .bg-paper { background-color: #FDFBF7; }
+        
+        .shadow-soft {
+            box-shadow: 0 4px 20px -2px rgba(140, 174, 151, 0.2);
+        }
+
+        /* Animations */
+        @keyframes popIn {
+            0% { transform: scale(0); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .animate-popIn {
+            animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+        .badge-locked { filter: grayscale(100%) opacity(0.5); }
+        
+        /* VexFlow Canvas Tweaks */
+        .vex-icon canvas, .vex-icon svg {
+            display: block;
+            margin: 0 auto;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        // =========================================================================
+        // 1. CONFIGURATION & DATA
+        // =========================================================================
+        
+        const TEACHER_MODE = true;
+
+        const NOTES_SHARP = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        const NOTES_FLAT  = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
+
+        const AVAILABLE_ROOTS = [
+            { name: 'C', index: 0, useFlats: false },
+            { name: 'G', index: 7, useFlats: false },
+            { name: 'D', index: 2, useFlats: false },
+            { name: 'A', index: 9, useFlats: false },
+            { name: 'B', index: 11, useFlats: false },
+            { name: 'F', index: 5, useFlats: true },
+            { name: 'Bb', index: 10, useFlats: true },
+            { name: 'Eb', index: 3, useFlats: true },
+            { name: 'Ab', index: 8, useFlats: true }
+        ];
+
+        const MAJOR_SCALE_TARGET = [2, 2, 1, 2, 2, 2, 1];
+
+        const RHYTHM_NOTES = [
+            { id: 'w', name: 'Whole', beats: 4 },
+            { id: 'h', name: 'Half', beats: 2 },
+            { id: 'q', name: 'Quarter', beats: 1 },
+            { id: '8', name: 'Eighth', beats: 0.5 },
+        ];
+
+        const RHYTHM_CHALLENGES = [
+            { name: "The Steady Beat", targetTotal: 4, required: ['q', 'q', 'q', 'q'], hint: "Fill the measure with 4 Quarter notes." },
+            { name: "Long & Short", targetTotal: 4, required: ['h', 'q', 'q'], hint: "One Half note and two Quarters." },
+            { name: "The Whole Picture", targetTotal: 4, required: ['w'], hint: "Just one note fills the whole measure." },
+            { name: "Speed Up", targetTotal: 4, required: ['q', '8', '8', 'h'], hint: "Quarter, two Eighths, then a Half." },
+            { name: "Syncopation Prep", targetTotal: 4, required: ['8', '8', 'q', 'h'], hint: "Two Eighths, Quarter, Half." }
+        ];
+
+        const ECHO_CHALLENGES = [
+            { name: "Simple Walk", sequence: ['q', 'q', 'q', 'q'], hint: "Four steady beats." },
+            { name: "Slow Down", sequence: ['q', 'q', 'h'], hint: "Two steps then a pause." },
+            { name: "Running Start", sequence: ['8', '8', 'q', 'h'], hint: "Quick-quick slow..." },
+            { name: "The Gallop", sequence: ['8', '8', 'q', '8', '8', 'q'], hint: "Da-da Dum, Da-da Dum" },
+            { name: "Syncopated", sequence: ['q', '8', '8', 'q', 'q'], hint: "Down, up-down, Down, Down" }
+        ];
+
+        const METER_CHALLENGES = [
+            { name: "Common Time", numerator: 4, hint: "Standard 4/4 time. Fill 4 beats." },
+            { name: "The Waltz", numerator: 3, hint: "3/4 Time. The measure is full after only 3 beats!" },
+            { name: "Marching", numerator: 4, hint: "Back to 4/4. Don't stop at 3!" },
+            { name: "Floating", numerator: 3, hint: "3/4 Time. Try using a Half note + Quarter." },
+            { name: "Mixed Meter", numerator: 3, hint: "3/4 Time. Three Quarter notes fit perfectly." }
+        ];
+
+        const EAR_INTERVAL_TYPES = [
+            { label: "Major 2nd", semitones: 2, hint: "Happy Birthday (Happy...)" },
+            { label: "Major 3rd", semitones: 4, hint: "When the Saints (Oh When...)" },
+            { label: "Perfect 4th", semitones: 5, hint: "Here Comes the Bride" },
+            { label: "Perfect 5th", semitones: 7, hint: "Twinkle Twinkle (Twin-kle)" },
+            { label: "Octave", semitones: 12, hint: "Somewhere Over the Rainbow (Some-where)" }
+        ];
+
+        const VISUAL_INTERVAL_TYPES = [
+            { label: "2nd", interval: 2, hint: "Line to Space (Neighbors)" },
+            { label: "3rd", interval: 3, hint: "Line to Line (Skip one)" },
+            { label: "4th", interval: 4, hint: "Line to Space (Gap)" },
+            { label: "5th", interval: 5, hint: "Line to Line (Skip two)" },
+            { label: "Octave", interval: 8, hint: "Wide leap (8 notes)" }
+        ];
+
+        const NOTE_HUNTER_LEVELS = [
+            { name: "White Keys", rangeMin: 0, rangeMax: 11, keyName: "C", useFlats: false, hints: "Any octave works!", showLabels: true },
+            { name: "Sharps & Flats", rangeMin: 0, rangeMax: 11, keyName: "D", useFlats: false, hints: "Watch the key signature (F# & C#)", showLabels: true },
+            { name: "Blind Mode (White)", rangeMin: 0, rangeMax: 11, keyName: "C", useFlats: false, hints: "No labels. Trust your eyes.", showLabels: false },
+            { name: "Blind Mode (Chromatic)", rangeMin: 0, rangeMax: 11, keyName: "Eb", useFlats: true, hints: "Hard mode. Flats enabled.", showLabels: false }
+        ];
+
+        const SOLFEGE_STEPS = [
+            { id: 0, label: 'Do', noteOffset: 0, color: 'bg-clay text-white' },
+            { id: 1, label: 'Re', noteOffset: 2, color: 'bg-sage text-white' },
+            { id: 2, label: 'Mi', noteOffset: 4, color: 'bg-clay text-white' },
+            { id: 3, label: 'Fa', noteOffset: 5, color: 'bg-sage text-white' },
+            { id: 4, label: 'Sol', noteOffset: 7, color: 'bg-clay text-white' },
+            { id: 5, label: 'La', noteOffset: 9, color: 'bg-sage text-white' },
+            { id: 6, label: 'Ti', noteOffset: 11, color: 'bg-sage text-white' },
+            { id: 7, label: 'Do', noteOffset: 12, color: 'bg-clay text-white' }
+        ];
+
+        const PROGRESSION_CHALLENGES = [
+            { name: "The Pop Anthem", desc: "The most famous progression.", target: [0, 4, 5, 3], targetLabels: ["I", "V", "vi", "IV"] },
+            { name: "The Jazz Turnaround", desc: "A staple of jazz.", target: [1, 4, 0, 5], targetLabels: ["ii", "V", "I", "vi"] },
+            { name: "The Ballad", desc: "Emotional and grounded.", target: [0, 5, 3, 4], targetLabels: ["I", "vi", "IV", "V"] },
+            { name: "Free Play", desc: "Create your own progression!", target: null, targetLabels: [] }
+        ];
+
+        const DIATONIC_DEGREES = [
+            { id: 0, label: 'I', type: 'Major', offset: 0, color: 'bg-clay text-white' },
+            { id: 1, label: 'ii', type: 'Minor', offset: 2, color: 'bg-sage text-white' },
+            { id: 2, label: 'iii', type: 'Minor', offset: 4, color: 'bg-sage text-white' },
+            { id: 3, label: 'IV', type: 'Major', offset: 5, color: 'bg-clay text-white' },
+            { id: 4, label: 'V', type: 'Major', offset: 7, color: 'bg-clay text-white' },
+            { id: 5, label: 'vi', type: 'Minor', offset: 9, color: 'bg-sage text-white' },
+        ];
+
+        // =========================================================================
+        // 2. HELPERS & GENERATORS
+        // =========================================================================
+
+        const getNoteName = (index, useFlats) => {
+            const normalizedIndex = (index + 1200) % 12; 
+            return useFlats ? NOTES_FLAT[normalizedIndex] : NOTES_SHARP[normalizedIndex];
+        };
+
+        const generateIntervalChallenges = (count = 5) => {
+            const intervalTypes = [
+                { semitones: 4, name: 'Major 3rd', hint: '4 Semitones (Happy)' },
+                { semitones: 7, name: 'Perfect 5th', hint: '7 Semitones (Stable)' },
+                { semitones: 3, name: 'Minor 3rd', hint: '3 Semitones (Sad)' },
+                { semitones: 5, name: 'Perfect 4th', hint: '5 Semitones' },
+                { semitones: 2, name: 'Major 2nd', hint: '2 Semitones (Whole Step)' }
+            ];
+            const challenges = [];
+            for (let i = 0; i < count; i++) {
+                const root = AVAILABLE_ROOTS[Math.floor(Math.random() * AVAILABLE_ROOTS.length)];
+                const interval = intervalTypes[Math.floor(Math.random() * intervalTypes.length)];
+                challenges.push({
+                    rootIndex: root.index,
+                    rootName: root.name,
+                    useFlats: root.useFlats,
+                    targetInterval: interval.semitones,
+                    targetName: interval.name,
+                    hint: interval.hint
+                });
+            }
+            return challenges;
+        };
+
+        const generateTriadChallenges = (count = 5) => {
+            const challenges = [];
+            for (let i = 0; i < count; i++) {
+                const root = AVAILABLE_ROOTS[Math.floor(Math.random() * AVAILABLE_ROOTS.length)];
+                const isMinor = Math.random() > 0.5;
+                challenges.push({
+                    rootIndex: root.index,
+                    rootName: root.name,
+                    useFlats: root.useFlats,
+                    type: isMinor ? 'Minor' : 'Major',
+                    hint: isMinor ? '1 - b3 - 5' : '1 - 3 - 5',
+                    targets: [
+                        { interval: isMinor ? 3 : 4, name: isMinor ? 'Minor 3rd' : 'Major 3rd' },
+                        { interval: 7, name: 'Perfect 5th' }
+                    ]
+                });
+            }
+            return challenges;
+        };
+
+        const generateDiatonicChallenges = (count = 5) => {
+            const degrees = [
+                { degree: 0, label: 'I (1st)', type: 'Major', offset: 0 },
+                { degree: 1, label: 'ii (2nd)', type: 'Minor', offset: 2 },
+                { degree: 2, label: 'iii (3rd)', type: 'Minor', offset: 4 },
+                { degree: 3, label: 'IV (4th)', type: 'Major', offset: 5 },
+                { degree: 4, label: 'V (5th)', type: 'Major', offset: 7 },
+                { degree: 5, label: 'vi (6th)', type: 'Minor', offset: 9 }
+            ];
+            const challenges = [];
+            for (let i = 0; i < count; i++) {
+                const root = AVAILABLE_ROOTS[Math.floor(Math.random() * AVAILABLE_ROOTS.length)];
+                const target = degrees[Math.floor(Math.random() * degrees.length)];
+                challenges.push({
+                    keyRootIndex: root.index,
+                    keyName: root.name,
+                    useFlats: root.useFlats,
+                    targetDegree: target.degree,
+                    targetLabel: target.label,
+                    expectedType: target.type,
+                    chordRootAbs: root.index + target.offset
+                });
+            }
+            return challenges;
+        };
+
+        const generateSolfegeChallenges = (count = 5) => {
+            const challenges = [];
+            for (let i = 0; i < count; i++) {
+                const target = SOLFEGE_STEPS[Math.floor(Math.random() * SOLFEGE_STEPS.length)];
+                challenges.push({
+                    targetId: target.id,
+                    targetLabel: target.label,
+                    noteOffset: target.noteOffset
+                });
+            }
+            return challenges;
+        };
+
+        const generateEarIntervalChallenges = (count = 5) => {
+            const challenges = [];
+            for (let i = 0; i < count; i++) {
+                const root = AVAILABLE_ROOTS[Math.floor(Math.random() * AVAILABLE_ROOTS.length)];
+                const type = EAR_INTERVAL_TYPES[Math.floor(Math.random() * EAR_INTERVAL_TYPES.length)];
+                challenges.push({
+                    rootIndex: root.index,
+                    rootName: root.name,
+                    useFlats: root.useFlats,
+                    targetInterval: type.semitones,
+                    targetLabel: type.label,
+                    hint: type.hint
+                });
+            }
+            return challenges;
+        };
+
+        const generateNoteReadingChallenges = (count = 5) => {
+            const challenges = [];
+            for (let i = 0; i < count; i++) {
+                const levelIdx = i < NOTE_HUNTER_LEVELS.length ? i : Math.floor(Math.random() * NOTE_HUNTER_LEVELS.length);
+                const level = NOTE_HUNTER_LEVELS[levelIdx];
+                const pitchClass = Math.floor(Math.random() * 12);
+                challenges.push({
+                    levelName: level.name,
+                    keyName: level.keyName,
+                    useFlats: level.useFlats,
+                    hint: level.hints,
+                    showLabels: level.showLabels,
+                    targetPitchClass: pitchClass, 
+                    noteName: getNoteName(pitchClass, level.useFlats),
+                    octave: 4 + (Math.random() > 0.5 ? 1 : 0) 
+                });
+            }
+            return challenges;
+        };
+
+        const generateVisualIntervalChallenges = (count = 5) => {
+            const challenges = [];
+            // Generate staff degrees relative to C4 (Middle C is 0)
+            // E4 is 2 (Line 1), G4 is 4 (Line 2)
+            for (let i = 0; i < count; i++) {
+                const targetType = VISUAL_INTERVAL_TYPES[Math.floor(Math.random() * VISUAL_INTERVAL_TYPES.length)];
+                
+                // Pick a random lower note (staff degree) between 0 (C4) and 7 (C5)
+                // We keep it simple: C Major key implies white keys
+                const lowerDegree = Math.floor(Math.random() * 7); // 0 to 6
+                const upperDegree = lowerDegree + (targetType.interval - 1); // 2nd is +1 degree, 3rd is +2
+                
+                // Map diatonic degrees to absolute note names in C Major
+                // C Major Scale: C(0), D(2), E(4), F(5), G(7), A(9), B(11)
+                const cMajorSemitones = [0, 2, 4, 5, 7, 9, 11, 12, 14, 16, 17, 19, 21, 23];
+                
+                const lowerAbs = cMajorSemitones[lowerDegree];
+                const upperAbs = cMajorSemitones[upperDegree];
+                
+                // Construct note objects
+                const lowerNote = {
+                    note: getNoteName(lowerAbs % 12, false),
+                    octave: 4 + Math.floor(lowerAbs / 12),
+                    index: lowerAbs % 12
+                };
+                const upperNote = {
+                    note: getNoteName(upperAbs % 12, false),
+                    octave: 4 + Math.floor(upperAbs / 12),
+                    index: upperAbs % 12
+                };
+
+                challenges.push({
+                    type: targetType,
+                    notes: [lowerNote, upperNote]
+                });
+            }
+            return challenges;
+        };
+
+        const generateKeySigChallenges = (count = 5) => {
+            const challenges = [];
+            // Filter AVAILABLE_ROOTS to mostly sharps/flats (exclude C if we want harder ones, or keep it)
+            const keys = AVAILABLE_ROOTS.filter(r => r.name !== 'C'); // Let's focus on non-C keys
+            
+            for (let i = 0; i < count; i++) {
+                const key = keys[Math.floor(Math.random() * keys.length)];
+                challenges.push(key);
+            }
+            return challenges;
+        };
+
+        const useProgress = () => {
+            const [progress, setProgress] = useState(() => {
+                if (TEACHER_MODE) {
+                    return { 'major-scale': true, 'degrees': true, 'triads': true, 'diatonic': true, 'progression': true, 'rhythm-1': true, 'rhythm-echo': true, 'meter': true, 'solfege': true, 'intervals-ear': true, 'note-hunter': true, 'intervals-eye': true, 'key-decoder': true };
+                }
+                const saved = localStorage.getItem('musicAppProgress');
+                return saved ? JSON.parse(saved) : { 'major-scale': false, 'degrees': false, 'triads': false, 'diatonic': false, 'progression': false, 'rhythm-1': false, 'rhythm-echo': false, 'meter': false, 'solfege': false, 'intervals-ear': false, 'note-hunter': false, 'intervals-eye': false, 'key-decoder': false };
+            });
+
+            const unlockBadge = (badgeId) => {
+                const newProgress = { ...progress, [badgeId]: true };
+                setProgress(newProgress);
+                localStorage.setItem('musicAppProgress', JSON.stringify(newProgress));
+            };
+
+            const resetProgress = () => {
+                const empty = { 'major-scale': false, 'degrees': false, 'triads': false, 'diatonic': false, 'progression': false, 'rhythm-1': false, 'rhythm-echo': false, 'meter': false, 'solfege': false, 'intervals-ear': false, 'note-hunter': false, 'intervals-eye': false, 'key-decoder': false };
+                setProgress(empty);
+                localStorage.setItem('musicAppProgress', JSON.stringify(empty));
+            };
+
+            return { progress, unlockBadge, resetProgress };
+        };
+
+        const playTone = async (note, duration = "8n", time = "+0") => {
+            if (Tone.context.state !== 'running') {
+                await Tone.context.resume();
+            }
+            const synth = new Tone.PolySynth(Tone.Synth, {
+                oscillator: { type: "triangle" },
+                envelope: { attack: 0.02, decay: 0.1, sustain: 0.3, release: 1 }
+            }).toDestination();
+            synth.volume.value = -8;
+            synth.triggerAttackRelease(note, duration, time);
+        };
+
+        const playPercussion = async (duration, time = "+0", velocity = 1) => {
+            if (Tone.context.state !== 'running') await Tone.context.resume();
+            const synth = new Tone.MembraneSynth().toDestination();
+            synth.volume.value = -6;
+            let toneDuration = "4n";
+            if (duration === 'w') toneDuration = "1n";
+            if (duration === 'h') toneDuration = "2n";
+            if (duration === 'q') toneDuration = "4n";
+            if (duration === '8') toneDuration = "8n";
+            synth.triggerAttackRelease("C2", toneDuration, time, velocity);
+        };
+
+        // =========================================================================
+        // 3. SHARED COMPONENTS
+        // =========================================================================
+
+        const Button = ({ onClick, children, variant = 'primary', disabled = false, className = '' }) => {
+            const baseStyle = "px-6 py-2 rounded-xl font-bold transition-all transform active:scale-95 disabled:opacity-50 disabled:scale-100";
+            const variants = {
+                primary: "bg-sage-dark text-white hover:bg-sage shadow-md",
+                secondary: "bg-white text-sage-dark border-2 border-sage-dark hover:bg-gray-50",
+                clay: "bg-clay text-white hover:bg-clay-dark shadow-md",
+                text: "text-gray-500 hover:text-red-500 underline text-sm"
+            };
+            return (
+                <button onClick={onClick} disabled={disabled} className={`${baseStyle} ${variants[variant]} ${className}`}>
+                    {children}
+                </button>
+            );
+        };
+
+        const VexRhythmNote = ({ duration, width = 40, height = 70, drawLine = false }) => {
+            const containerRef = useRef(null);
+            useEffect(() => {
+                if (!containerRef.current) return;
+                containerRef.current.innerHTML = '';
+                const VF = Vex.Flow;
+                const renderer = new VF.Renderer(containerRef.current, VF.Renderer.Backends.SVG);
+                renderer.resize(width, height);
+                const context = renderer.getContext();
+                const staveY = (height / 2) - 55;
+                
+                if (drawLine) {
+                    context.beginPath();
+                    context.moveTo(0, height / 2);
+                    context.lineTo(width, height / 2);
+                    context.setStrokeStyle("#000000");
+                    context.setLineWidth(1);
+                    context.stroke();
+                }
+
+                const stave = new VF.Stave(0, staveY, width);
+                const note = new VF.StaveNote({ clef: "treble", keys: ["b/4"], duration: duration, auto_stem: false, stem_direction: 1 });
+                note.setStyle({ fillStyle: "currentColor", strokeStyle: "currentColor" });
+                const voice = new VF.Voice({ num_beats: 4, beat_value: 4 });
+                voice.setStrict(false);
+                voice.addTickables([note]);
+                new VF.Formatter().joinVoices([voice]).format([voice], width);
+                note.setStave(stave);
+                note.setContext(context).draw();
+            }, [duration, width, height, drawLine]);
+            return <div ref={containerRef} className="vex-icon flex justify-center items-center pointer-events-none" />;
+        };
+
+        const TimeSigDisplay = ({ numerator }) => {
+            return (
+                <div className="flex flex-col items-center justify-center font-bold text-2xl leading-none mr-4 font-serif">
+                    <span>{numerator}</span>
+                    <span>4</span>
+                </div>
+            );
+        };
+
+        const Piano = ({ activeNotes, playNote, useFlats, onNoteClick, showLabels = true }) => {
+            const startOctave = 4;
+            const getActiveNote = (absIndex) => activeNotes && activeNotes.find(n => { 
+                const noteAbs = (n.octave - 4) * 12 + n.index; 
+                return noteAbs === absIndex; 
+            });
+
+            const handleNoteClick = (name, octave, absIndex) => { 
+                playNote(`${name}${octave}`); 
+                if (onNoteClick) onNoteClick({ name, octave, absIndex }); 
+            };
+
+            return (
+                <div className="relative h-48 bg-sand p-4 rounded-xl shadow-inner overflow-x-auto flex justify-center select-none">
+                   <div className="flex relative items-start">
+                        {Array.from({ length: 15 }).map((_, i) => { 
+                            const whiteNoteNames = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+                            const name = whiteNoteNames[i % 7];
+                            const octave = startOctave + Math.floor(i / 7);
+                            const semitoneOffsets = [0, 2, 4, 5, 7, 9, 11];
+                            const whiteKeyAbsIndex = (Math.floor(i/7) * 12) + semitoneOffsets[i % 7];
+                            
+                            const activeNote = getActiveNote(whiteKeyAbsIndex);
+                            const isActive = !!activeNote;
+                            const isRoot = isActive && activeNote.isRoot; 
+                            const isError = isActive && !activeNote.isRoot && activeNote.isError; 
+
+                            const hasBlackKey = ['C', 'D', 'F', 'G', 'A'].includes(name);
+                            const blackKeyAbsIndex = whiteKeyAbsIndex + 1; 
+                            
+                            const activeBlackNote = getActiveNote(blackKeyAbsIndex);
+                            const isBlackActive = !!activeBlackNote;
+                            const isBlackRoot = isBlackActive && activeBlackNote.isRoot;
+                            const isBlackError = isBlackActive && !activeBlackNote.isRoot && activeBlackNote.isError;
+
+                            let whiteLabel = (showLabels || isActive) ? name : '';
+                            let blackKeyName = activeBlackNote ? activeBlackNote.note : getNoteName(blackKeyAbsIndex % 12, useFlats);
+                            let blackLabel = (showLabels || isBlackActive) ? blackKeyName : '';
+
+                            return (
+                                <div key={`key-group-${i}`} className="relative group">
+                                    <div 
+                                        onClick={() => handleNoteClick(name, octave, whiteKeyAbsIndex)}
+                                        className={`w-10 md:w-12 h-40 border border-gray-300 bg-white rounded-b-lg z-10 active:bg-gray-200 cursor-pointer flex items-end justify-center pb-3 transition-colors duration-200 
+                                            ${isRoot ? '!bg-green-500' : isError ? '!bg-red-400' : isActive ? '!bg-sage-dark' : 'hover:bg-gray-50'}`}
+                                    >
+                                        <span className={`text-xs font-bold ${isRoot || isError || isActive ? 'text-white' : 'text-gray-400'}`}>
+                                            {whiteLabel}
+                                        </span>
+                                    </div>
+                                    
+                                    {hasBlackKey && (
+                                        <div 
+                                            className={`absolute w-7 md:w-8 h-24 bg-gray-800 rounded-b-lg z-20 cursor-pointer -right-3.5 md:-right-4 top-0 border-x border-b border-gray-900 active:bg-black transition-colors shadow-sm flex items-end justify-center pb-2
+                                                ${isBlackRoot ? '!bg-green-600' : isBlackError ? '!bg-red-500' : isBlackActive ? '!bg-clay' : ''}`}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                const clickedName = getNoteName(blackKeyAbsIndex % 12, useFlats); 
+                                                handleNoteClick(clickedName, octave, blackKeyAbsIndex);
+                                            }}
+                                        >
+                                            <span className={`text-[10px] font-bold ${isBlackRoot || isBlackError || isBlackActive ? 'text-white' : 'text-gray-500'}`}>
+                                                {blackLabel}
+                                            </span>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                   </div>
+                </div>
+            );
+        };
+
+        const NotationDisplay = ({ notes, keySignature = null }) => {
+            const containerRef = useRef(null);
+            useEffect(() => {
+                if (!containerRef.current) return;
+                containerRef.current.innerHTML = '';
+                
+                // Don't return early if just showing key signature (notes can be empty)
+                if ((!notes || notes.length === 0) && !keySignature) return;
+
+                const VF = Vex.Flow;
+                // Calculate needed width: base + key sig space + notes
+                const noteWidth = notes ? notes.length * 50 : 0;
+                const width = Math.max(400, noteWidth + 100);
+                const height = 140;
+                const renderer = new VF.Renderer(containerRef.current, VF.Renderer.Backends.SVG);
+                renderer.resize(width, height);
+                const context = renderer.getContext();
+                const stave = new VF.Stave(10, 20, width - 20);
+                stave.addClef("treble");
+                if (keySignature) stave.addKeySignature(keySignature);
+                stave.setContext(context).draw();
+
+                if (!notes || notes.length === 0) return;
+
+                const uniqueNotes = notes.filter((v,i,a)=>a.findIndex(t=>(t.note===v.note && t.octave===v.octave))===i);
+                
+                const vfNotes = uniqueNotes.map(n => {
+                    const key = `${n.note}/${n.octave}`;
+                    const isHigh = n.octave > 4 || (n.octave === 4 && n.index >= 11);
+                    
+                    const note = new VF.StaveNote({ 
+                        clef: "treble", 
+                        keys: [key], 
+                        duration: "q",
+                        stem_direction: isHigh ? -1 : 1
+                    });
+                    
+                    // Only add accidentals if NO key signature is present OR if it's natural in a key?
+                    // Simplified: We assume C Major context for everything except Key Decoder.
+                    // For Key Decoder, we don't show notes usually.
+                    // For Note Hunter, we manually check accidentals.
+                    if (n.note.includes('#')) {
+                        note.addModifier(new VF.Accidental("#"));
+                    } else if (n.note.includes('b')) {
+                        note.addModifier(new VF.Accidental("b"));
+                    }
+                    return note;
+                });
+                
+                if (vfNotes.length > 0) {
+                    const voice = new VF.Voice({ num_beats: vfNotes.length, beat_value: 4 });
+                    voice.setStrict(false);
+                    voice.addTickables(vfNotes);
+                    new VF.Formatter().joinVoices([voice]).format([voice], width - 70);
+                    voice.draw(context, stave);
+                }
+            }, [notes, keySignature]);
+            return <div ref={containerRef} className="w-full flex justify-center overflow-x-auto"></div>;
+        };
+
+        // =========================================================================
+        // 4. LEVEL MODULES
+        // =========================================================================
+
+        const LevelMajorScale = ({ onComplete, onExit }) => { 
+            const initialRoot = useMemo(() => AVAILABLE_ROOTS[Math.floor(Math.random() * AVAILABLE_ROOTS.length)], []);
+            const [rootNoteIdx, setRootNoteIdx] = useState(initialRoot.index); 
+            const [userSteps, setUserSteps] = useState([]); 
+            const [calculatedNotes, setCalculatedNotes] = useState([]);
+            const [message, setMessage] = useState("Let's build a Major Scale! Start with a Whole Step.");
+            const [isCorrect, setIsCorrect] = useState(false);
+            const currentRootObj = AVAILABLE_ROOTS.find(r => r.index === rootNoteIdx);
+            const useFlats = currentRootObj ? currentRootObj.useFlats : false;
+            useEffect(() => {
+                const rootName = getNoteName(rootNoteIdx, useFlats);
+                const rootOctave = 4;
+                const newNotes = [{ note: rootName, octave: rootOctave, index: rootNoteIdx, fullName: `${rootName}${rootOctave}`, isRoot: true }];
+                let currentAbsoluteIndex = rootNoteIdx;
+                userSteps.forEach(step => {
+                    currentAbsoluteIndex += step;
+                    const noteIdx = currentAbsoluteIndex % 12;
+                    const octave = 4 + Math.floor(currentAbsoluteIndex / 12);
+                    const noteName = getNoteName(noteIdx, useFlats);
+                    newNotes.push({ note: noteName, octave: octave, index: noteIdx, fullName: `${noteName}${octave}`, isRoot: false });
+                });
+                setCalculatedNotes(newNotes);
+                const isMatching = userSteps.every((val, index) => val === MAJOR_SCALE_TARGET[index]);
+                if (userSteps.length > 0 && !isMatching) setMessage("Oops! That interval sounds discordant.");
+                else if (userSteps.length === 7 && isMatching) { setMessage("🎉 Perfect! Major Scale Constructed."); setIsCorrect(true); setTimeout(() => calculatedNotes.forEach((n, i) => playTone(n.fullName, "8n", Tone.now() + 0.1 + (i * 0.3))), 500); }
+                else setMessage(`Good! ${7 - userSteps.length} intervals left.`);
+            }, [userSteps, rootNoteIdx, useFlats]);
+            return (
+                <div className="w-full max-w-4xl mx-auto animate-popIn">
+                    <div className="flex justify-between items-center mb-6"><button onClick={onExit} className="text-gray-500 hover:text-sage-dark font-bold">← Dashboard</button><h2 className="text-2xl text-sage-dark handwritten">Module 1: Scales</h2><div className="w-20"></div></div>
+                    <div className="bg-white rounded-3xl p-8 shadow-soft">
+                        <div className="mb-4 text-center"><select value={rootNoteIdx} onChange={(e) => {setUserSteps([]); setRootNoteIdx(parseInt(e.target.value))}} className="p-2 border rounded">{AVAILABLE_ROOTS.map(r=><option key={r.index} value={r.index}>{r.name}</option>)}</select></div>
+                        <NotationDisplay notes={calculatedNotes} />
+                        <div className="my-6"><Piano activeNotes={calculatedNotes} playNote={playTone} useFlats={useFlats} /></div>
+                        <div className="flex justify-center gap-4 mb-4">
+                            <button onClick={() => setUserSteps([...userSteps, 2])} disabled={isCorrect} className="px-6 py-4 bg-clay text-white rounded-xl font-bold">Whole (2)</button>
+                            <button onClick={() => setUserSteps([...userSteps, 1])} disabled={isCorrect} className="px-6 py-4 bg-sage text-white rounded-xl font-bold">Half (1)</button>
+                            <button onClick={() => setUserSteps(userSteps.slice(0,-1))} className="px-4 py-4 text-gray-500">Undo</button>
+                        </div>
+                        <div className="text-center font-bold text-gray-600">{message}</div>
+                        {isCorrect && <div className="text-center mt-4"><Button onClick={() => onComplete('major-scale')}>Collect Badge</Button></div>}
+                    </div>
+                </div>
+            );
+        };
+
+        const LevelIntervals = ({ onComplete, onExit }) => {
+            const challenges = useMemo(() => generateIntervalChallenges(5), []);
+            const [stage, setStage] = useState(0); 
+            const [feedback, setFeedback] = useState("Click the piano key that matches the target interval.");
+            const [displayedNotes, setDisplayedNotes] = useState([]); 
+            const [hasWonStage, setHasWonStage] = useState(false);
+            const challenge = challenges[stage];
+            const isFinished = stage >= challenges.length;
+
+            useEffect(() => {
+                if (isFinished) return;
+                const rootOctave = 4;
+                const rootObj = { note: challenge.rootName, octave: rootOctave, index: challenge.rootIndex, fullName: `${challenge.rootName}${rootOctave}`, isRoot: true };
+                setDisplayedNotes([rootObj]);
+                setHasWonStage(false);
+                setFeedback(`Find the ${challenge.targetName} of ${challenge.rootName}`);
+                setTimeout(() => playTone(rootObj.fullName, "4n"), 500);
+            }, [stage, isFinished, challenge]);
+
+            const playTargetAudio = async () => {
+                if (Tone.context.state !== 'running') await Tone.context.resume();
+                const targetAbs = challenge.rootIndex + challenge.targetInterval;
+                const targetOctave = 4 + Math.floor(targetAbs / 12);
+                const targetNoteName = getNoteName(targetAbs % 12, false); 
+                const synth = new Tone.PolySynth().toDestination();
+                synth.volume.value = -8;
+                const now = Tone.now();
+                synth.triggerAttackRelease(`${challenge.rootName}4`, "4n", now);
+                synth.triggerAttackRelease(`${targetNoteName}${targetOctave}`, "4n", now + 0.5);
+            };
+
+            const handleNoteClick = (noteInfo) => {
+                if (hasWonStage || isFinished) return;
+                const distance = noteInfo.absIndex - challenge.rootIndex;
+                if (distance === challenge.targetInterval) {
+                    setHasWonStage(true);
+                    setFeedback("Correct! 🎉");
+                    playTone(noteInfo.name + noteInfo.octave, "4n");
+                    setDisplayedNotes([...displayedNotes, { note: noteInfo.name, octave: noteInfo.octave, index: noteInfo.absIndex % 12, fullName: `${noteInfo.name}${noteInfo.octave}`, isRoot: false }]);
+                } else {
+                    setFeedback(distance < 0 ? "Too low!" : `That is a ${distance} semitone interval. Try again.`);
+                }
+            };
+
+            if (isFinished) return null;
+
+            return (
+                <div className="w-full max-w-4xl mx-auto animate-popIn">
+                    <div className="flex justify-between items-center mb-6">
+                        <button onClick={onExit} className="text-gray-500 hover:text-sage-dark font-bold flex items-center gap-1">← Dashboard</button>
+                        <h2 className="text-2xl text-sage-dark handwritten">Module 2: Intervals</h2>
+                        <div className="text-xs font-bold bg-gray-200 px-3 py-1 rounded-full text-gray-500">Challenge {stage + 1} / {challenges.length}</div>
+                    </div>
+                    <div className="w-full bg-white rounded-3xl shadow-soft p-4 md:p-8 border border-gray-100">
+                        <div className="text-center mb-8 relative">
+                            <h3 className="text-3xl text-clay-dark mb-2 font-bold">{challenge.targetName}</h3>
+                            <p className="text-gray-500 mb-4">Find the note <strong>{challenge.hint}</strong> relative to the root.</p>
+                            <button onClick={playTargetAudio} className="bg-sage/20 text-sage-dark hover:bg-sage hover:text-white transition-colors px-4 py-1 rounded-full text-sm font-bold flex items-center gap-2 mx-auto">🔊 Hear Goal</button>
+                        </div>
+                        <div className="mb-6 flex flex-col items-center justify-center min-h-[160px] bg-paper rounded-xl border-2 border-dashed border-gray-200 relative overflow-hidden"><NotationDisplay notes={displayedNotes} /></div>
+                        <div className="mb-8"><Piano activeNotes={displayedNotes} playNote={playTone} onNoteClick={handleNoteClick} useFlats={challenge.useFlats} /></div>
+                        <div className={`p-4 rounded-xl text-center transition-colors duration-300 mb-6 ${hasWonStage ? 'bg-green-100 text-green-800' : 'bg-sand/50 text-gray-600'}`}><span className="font-bold text-lg block mb-1">{hasWonStage ? "Excellent!" : feedback}</span></div>
+                        <div className="flex justify-center h-16">{hasWonStage && (<Button onClick={() => stage + 1 < challenges.length ? setStage(stage + 1) : onComplete('degrees')} variant="primary" className="animate-popIn text-lg px-10">{stage + 1 === challenges.length ? "Finish Module" : "Next Challenge →"}</Button>)}</div>
+                    </div>
+                </div>
+            );
+        };
+
+        const LevelTriads = ({ onComplete, onExit }) => {
+            const challenges = useMemo(() => generateTriadChallenges(5), []);
+            const [stage, setStage] = useState(0); 
+            const [feedback, setFeedback] = useState("Build the chord by finding the 3rd and 5th.");
+            const [displayedNotes, setDisplayedNotes] = useState([]); 
+            const [foundIntervals, setFoundIntervals] = useState([]); 
+            const challenge = challenges[stage];
+            const isFinished = stage >= challenges.length;
+            const hasWonStage = foundIntervals.length === 2; 
+
+            useEffect(() => {
+                if (isFinished) return;
+                const rootObj = { note: challenge.rootName, octave: 4, index: challenge.rootIndex, fullName: `${challenge.rootName}4`, isRoot: true };
+                setDisplayedNotes([rootObj]);
+                setFoundIntervals([]);
+                setFeedback(`Build a ${challenge.rootName} ${challenge.type} Triad.`);
+                setTimeout(() => playTone(rootObj.fullName, "4n"), 500);
+            }, [stage, isFinished, challenge]);
+
+            const playChord = async () => {
+                if (Tone.context.state !== 'running') await Tone.context.resume();
+                const now = Tone.now();
+                const notesToPlay = hasWonStage 
+                    ? displayedNotes.map(n => n.fullName)
+                    : [0, ...challenge.targets.map(t => t.interval)].map(i => {
+                        const abs = challenge.rootIndex + i;
+                        return `${getNoteName(abs%12, challenge.useFlats)}${4 + Math.floor(abs/12)}`;
+                    });
+                
+                const synth = new Tone.PolySynth().toDestination();
+                synth.volume.value = -8;
+                notesToPlay.forEach(n => synth.triggerAttackRelease(n, "2n", now));
+            };
+
+            const handleNoteClick = (noteInfo) => {
+                if (hasWonStage || isFinished) return;
+                const distance = noteInfo.absIndex - challenge.rootIndex;
+                const matchedTarget = challenge.targets.find(t => t.interval === distance);
+                
+                if (matchedTarget) {
+                    if (foundIntervals.includes(distance)) {
+                         setFeedback(`You already found the ${matchedTarget.name}. Find the other note!`);
+                         playTone(noteInfo.name + noteInfo.octave, "8n");
+                    } else {
+                        const newFound = [...foundIntervals, distance];
+                        setFoundIntervals(newFound);
+                        playTone(noteInfo.name + noteInfo.octave, "4n");
+                        const newNote = { note: noteInfo.name, octave: noteInfo.octave, index: noteInfo.absIndex % 12, fullName: `${noteInfo.name}${noteInfo.octave}`, isRoot: false };
+                        setDisplayedNotes(prev => [...prev, newNote]);
+                        if (newFound.length === 2) setFeedback(`🎉 Perfect! ${challenge.rootName} ${challenge.type} Triad.`);
+                        else setFeedback(`Good! That's the ${matchedTarget.name}. One more note needed.`);
+                    }
+                } else {
+                    setFeedback(distance === 0 ? "That's the Root note." : "Not quite part of this chord. Try again.");
+                }
+            };
+
+            if (isFinished) return null;
+
+            return (
+                <div className="w-full max-w-4xl mx-auto animate-popIn">
+                    <div className="flex justify-between items-center mb-6">
+                        <button onClick={onExit} className="text-gray-500 hover:text-sage-dark font-bold flex items-center gap-1">← Dashboard</button>
+                        <h2 className="text-2xl text-sage-dark handwritten">Module 3: Triads</h2>
+                        <div className="text-xs font-bold bg-gray-200 px-3 py-1 rounded-full text-gray-500">Challenge {stage + 1} / {challenges.length}</div>
+                    </div>
+                    <div className="w-full bg-white rounded-3xl shadow-soft p-4 md:p-8 border border-gray-100">
+                        <div className="text-center mb-8 relative">
+                            <h3 className="text-3xl text-clay-dark mb-2 font-bold">{challenge.rootName} {challenge.type}</h3>
+                            <p className="text-gray-500 mb-4">Find the <strong>3rd</strong> and <strong>5th</strong> ({challenge.hint})</p>
+                            <button onClick={playChord} className="bg-sage/20 text-sage-dark hover:bg-sage hover:text-white transition-colors px-4 py-1 rounded-full text-sm font-bold flex items-center gap-2 mx-auto">🔊 Hear Chord</button>
+                        </div>
+                        <div className="mb-6 flex flex-col items-center justify-center min-h-[160px] bg-paper rounded-xl border-2 border-dashed border-gray-200 relative overflow-hidden"><NotationDisplay notes={displayedNotes} /></div>
+                        <div className="mb-8"><Piano activeNotes={displayedNotes} playNote={playTone} onNoteClick={handleNoteClick} useFlats={challenge.useFlats} /></div>
+                        <div className={`p-4 rounded-xl text-center transition-colors duration-300 mb-6 ${hasWonStage ? 'bg-green-100 text-green-800' : 'bg-sand/50 text-gray-600'}`}><span className="font-bold text-lg block mb-1">{feedback}</span></div>
+                        <div className="flex justify-center h-16">{hasWonStage && (<Button onClick={() => stage + 1 < challenges.length ? setStage(stage + 1) : onComplete('triads')} variant="primary" className="animate-popIn text-lg px-10">{stage + 1 === challenges.length ? "Finish Module" : "Next Challenge →"}</Button>)}</div>
+                    </div>
+                </div>
+            );
+        };
+
+        const LevelDiatonic = ({ onComplete, onExit }) => {
+            const challenges = useMemo(() => generateDiatonicChallenges(5), []);
+            const [stage, setStage] = useState(0); 
+            const [feedback, setFeedback] = useState("Click the Root Note of the requested chord.");
+            const [displayedNotes, setDisplayedNotes] = useState([]); 
+            const [hasWonStage, setHasWonStage] = useState(false);
+            const challenge = challenges[stage];
+            const isFinished = stage >= challenges.length;
+
+            useEffect(() => {
+                if (isFinished) return;
+                setDisplayedNotes([]);
+                setHasWonStage(false);
+                setFeedback(`Find the ${challenge.targetLabel} chord in ${challenge.keyName} Major.`);
+            }, [stage, isFinished, challenge]);
+
+            const playFullChord = (rootAbs, isMinor) => {
+                 const interval3 = isMinor ? 3 : 4;
+                 const chordIntervals = [0, interval3, 7];
+                 const synth = new Tone.PolySynth().toDestination();
+                 synth.volume.value = -8;
+                 const now = Tone.now();
+                 const visNotes = chordIntervals.map(i => {
+                     const abs = rootAbs + i;
+                     const oct = 4 + Math.floor(abs/12);
+                     return { note: getNoteName(abs%12, challenge.useFlats), octave: oct, index: abs%12, fullName: `${getNoteName(abs%12, challenge.useFlats)}${oct}`, isRoot: i===0 };
+                 });
+                 setDisplayedNotes(visNotes);
+                 visNotes.forEach(n => synth.triggerAttackRelease(n.fullName, "1n", now));
+            };
+
+            const handleNoteClick = (noteInfo) => {
+                if (hasWonStage || isFinished) return;
+                const clickedChroma = noteInfo.absIndex % 12;
+                const targetChroma = challenge.chordRootAbs % 12;
+                
+                if (clickedChroma === targetChroma) {
+                    setHasWonStage(true);
+                    setFeedback(`Correct! That's the ${getNoteName(clickedChroma, challenge.useFlats)} ${challenge.expectedType} chord.`);
+                    playFullChord(noteInfo.absIndex, challenge.expectedType === 'Minor');
+                } else {
+                    setFeedback("Not quite. Count up the scale to find the correct degree.");
+                    playTone(noteInfo.name + noteInfo.octave, "8n");
+                }
+            };
+
+            if (isFinished) return null;
+
+            return (
+                <div className="w-full max-w-4xl mx-auto animate-popIn">
+                    <div className="flex justify-between items-center mb-6">
+                        <button onClick={onExit} className="text-gray-500 hover:text-sage-dark font-bold flex items-center gap-1">← Dashboard</button>
+                        <h2 className="text-2xl text-sage-dark handwritten">Module 4: Key Chords</h2>
+                        <div className="text-xs font-bold bg-gray-200 px-3 py-1 rounded-full text-gray-500">Challenge {stage + 1} / {challenges.length}</div>
+                    </div>
+                    <div className="w-full bg-white rounded-3xl shadow-soft p-4 md:p-8 border border-gray-100">
+                        <div className="text-center mb-8 relative">
+                            <h3 className="text-3xl text-clay-dark mb-2 font-bold">Key of {challenge.keyName} Major</h3>
+                            <p className="text-gray-500 mb-4">Find the <strong>{challenge.targetLabel}</strong> chord.</p>
+                        </div>
+                        <div className="mb-6 flex flex-col items-center justify-center min-h-[160px] bg-paper rounded-xl border-2 border-dashed border-gray-200 relative overflow-hidden"><NotationDisplay notes={displayedNotes} /></div>
+                        <div className="mb-8"><Piano activeNotes={displayedNotes} playNote={playTone} onNoteClick={handleNoteClick} useFlats={challenge.useFlats} /></div>
+                        <div className={`p-4 rounded-xl text-center transition-colors duration-300 mb-6 ${hasWonStage ? 'bg-green-100 text-green-800' : 'bg-sand/50 text-gray-600'}`}><span className="font-bold text-lg block mb-1">{feedback}</span></div>
+                        <div className="flex justify-center h-16">{hasWonStage && (<Button onClick={() => stage + 1 < challenges.length ? setStage(stage + 1) : onComplete('diatonic')} variant="primary" className="animate-popIn text-lg px-10">{stage + 1 === challenges.length ? "Finish Module" : "Next Challenge →"}</Button>)}</div>
+                    </div>
+                </div>
+            );
+        };
+
+        const LevelProgression = ({ onComplete, onExit }) => {
+            const [timeline, setTimeline] = useState([null, null, null, null]);
+            const [selectedChordDegree, setSelectedChordDegree] = useState(null); 
+            const [isPlaying, setIsPlaying] = useState(false);
+            const [activeBar, setActiveBar] = useState(-1);
+            const [currentKey, setCurrentKey] = useState(AVAILABLE_ROOTS[0]); 
+            const [challengeIdx, setChallengeIdx] = useState(0); 
+            const challenge = PROGRESSION_CHALLENGES[challengeIdx];
+
+            const getChordNotes = (degreeObj, keyRootIndex) => {
+                const rootAbs = keyRootIndex + degreeObj.offset;
+                const isMinor = degreeObj.type === 'Minor';
+                const intervals = [0, isMinor ? 3 : 4, 7];
+                return intervals.map(i => {
+                    const abs = rootAbs + i;
+                    const oct = 4 + Math.floor(abs/12);
+                    return `${getNoteName(abs%12, currentKey.useFlats)}${oct}`;
+                });
+            };
+
+            useEffect(() => {
+                if (!isPlaying) { setActiveBar(-1); return; }
+                let step = 0;
+                const loop = setInterval(() => {
+                    setActiveBar(step);
+                    const chordId = timeline[step];
+                    if (chordId !== null) {
+                        const degreeObj = DIATONIC_DEGREES[chordId];
+                        const notes = getChordNotes(degreeObj, currentKey.index);
+                        const synth = new Tone.PolySynth().toDestination();
+                        synth.volume.value = -8;
+                        notes.forEach(n => synth.triggerAttackRelease(n, "2n"));
+                    }
+                    step++;
+                    if (step >= 4) step = 0;
+                }, 1000); 
+                return () => clearInterval(loop);
+            }, [isPlaying, timeline, currentKey]);
+
+            const handlePaletteClick = (id) => {
+                setSelectedChordDegree(id);
+                if (Tone.context.state !== 'running') Tone.context.resume();
+                const degreeObj = DIATONIC_DEGREES[id];
+                const notes = getChordNotes(degreeObj, currentKey.index);
+                const synth = new Tone.PolySynth().toDestination();
+                synth.volume.value = -10;
+                notes.forEach(n => synth.triggerAttackRelease(n, "8n"));
+            };
+
+            const handleTimelineClick = (index) => {
+                if (selectedChordDegree === null) return;
+                const newTimeline = [...timeline];
+                newTimeline[index] = selectedChordDegree;
+                setTimeline(newTimeline);
+            };
+
+            const isSuccess = challenge.target && timeline.every((val, i) => val === challenge.target[i]);
+
+            return (
+                <div className="w-full max-w-4xl mx-auto animate-popIn">
+                    <div className="flex justify-between items-center mb-6">
+                        <button onClick={onExit} className="text-gray-500 hover:text-sage-dark font-bold flex items-center gap-1">← Dashboard</button>
+                        <h2 className="text-2xl text-sage-dark handwritten">Module 5: Progression Lab</h2>
+                        <select value={currentKey.index} onChange={(e) => { const newKey = AVAILABLE_ROOTS.find(r => r.index === parseInt(e.target.value)); setCurrentKey(newKey); setTimeline([null, null, null, null]); }} className="bg-white border border-gray-200 rounded-lg px-2 py-1 text-sm font-bold text-gray-600">
+                            {AVAILABLE_ROOTS.map(k => <option key={k.index} value={k.index}>{k.name} Major</option>)}
+                        </select>
+                    </div>
+                    <div className="bg-white rounded-3xl shadow-soft p-6 md:p-8 border border-gray-100">
+                        <div className="flex justify-center gap-2 mb-6 overflow-x-auto pb-2">
+                            {PROGRESSION_CHALLENGES.map((c, i) => (<button key={i} onClick={() => { setChallengeIdx(i); setTimeline([null,null,null,null]); setIsPlaying(false); }} className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap transition-colors ${challengeIdx === i ? 'bg-sage-dark text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>{c.name}</button>))}
+                        </div>
+                        <div className="text-center mb-8">
+                            <h3 className="text-2xl text-gray-700 font-bold mb-1">{challenge.name}</h3>
+                            <p className="text-gray-500 italic mb-2">{challenge.desc}</p>
+                            {challenge.targetLabels.length > 0 && (<div className="text-sm font-bold text-clay-dark bg-clay/10 inline-block px-3 py-1 rounded-lg">Goal: {challenge.targetLabels.join(" - ")}</div>)}
+                        </div>
+                        <div className="grid grid-cols-4 gap-2 md:gap-4 mb-8 bg-paper p-4 rounded-2xl border-2 border-dashed border-gray-200">
+                            {timeline.map((chordId, i) => {
+                                const chord = chordId !== null ? DIATONIC_DEGREES[chordId] : null;
+                                return (<div key={i} onClick={() => handleTimelineClick(i)} className={`h-24 md:h-32 rounded-xl flex items-center justify-center cursor-pointer transition-all border-2 ${activeBar === i ? 'ring-4 ring-yellow-300 scale-105 z-10' : ''} ${chord ? chord.color : 'bg-white border-gray-200 hover:border-sage-dark'}`}>{chord ? (<div className="text-center"><div className="text-2xl md:text-3xl font-bold">{chord.label}</div><div className="text-xs opacity-75">{chord.type}</div></div>) : (<div className="text-gray-300 font-bold text-sm uppercase">Bar {i+1}</div>)}</div>);
+                            })}
+                        </div>
+                        <div className="flex justify-center gap-4 mb-8">
+                            <button onClick={() => setIsPlaying(!isPlaying)} className={`px-8 py-3 rounded-xl font-bold text-white shadow-md transition-transform active:scale-95 flex items-center gap-2 ${isPlaying ? 'bg-red-500 hover:bg-red-600' : 'bg-sage-dark hover:bg-sage'}`}>{isPlaying ? (<span>⏹ Stop</span>) : (<span>▶ Play Loop</span>)}</button>
+                            <button onClick={() => setTimeline([null,null,null,null])} className="px-6 py-3 rounded-xl font-bold text-gray-500 bg-gray-100 hover:bg-gray-200">Clear</button>
+                        </div>
+                        <div className="bg-gray-50 p-4 rounded-2xl">
+                            <div className="text-center text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Chord Palette (Click to Select)</div>
+                            <div className="flex justify-center gap-2 flex-wrap">
+                                {DIATONIC_DEGREES.map((d) => (<button key={d.id} onClick={() => handlePaletteClick(d.id)} className={`w-16 h-16 md:w-20 md:h-20 rounded-xl flex flex-col items-center justify-center shadow-sm transition-all ${d.color} ${selectedChordDegree === d.id ? 'ring-4 ring-offset-2 ring-sage-dark scale-110' : 'hover:scale-105'}`}><span className="text-xl font-bold">{d.label}</span><span className="text-[10px] opacity-80">{d.type}</span></button>))}
+                            </div>
+                        </div>
+                        {isSuccess && (<div className="mt-8 text-center animate-popIn bg-green-50 p-6 rounded-2xl border border-green-100"><h4 className="text-2xl font-bold text-green-700 mb-2">Goal Met! 🎉</h4><p className="text-green-600 mb-4">You've built the {challenge.name}. Listen to how the chords flow into each other.</p><Button onClick={() => onComplete('progression')} variant="clay">Collect Badge</Button></div>)}
+                    </div>
+                </div>
+            );
+        };
+
+        const LevelRhythm = ({ onComplete, onExit }) => {
+            const [stage, setStage] = useState(0);
+            const [measure, setMeasure] = useState([]); // Array of note IDs
+            const [isPlaying, setIsPlaying] = useState(false);
+            
+            const challenge = RHYTHM_CHALLENGES[stage];
+            
+            const currentTotal = measure.reduce((sum, id) => {
+                const note = RHYTHM_NOTES.find(n => n.id === id);
+                return sum + (note ? note.beats : 0);
+            }, 0);
+
+            const isFull = currentTotal === 4;
+            const isOverflow = currentTotal > 4;
+            
+            // Check win condition
+            const checkWin = () => {
+                if (!isFull) return false;
+                const currentIds = measure;
+                const targetIds = challenge.required;
+                if (currentIds.length !== targetIds.length) return false;
+                return currentIds.every((val, index) => val === targetIds[index]);
+            };
+
+            const isCorrect = checkWin();
+
+            const playSequence = async () => {
+                if (Tone.context.state !== 'running') await Tone.context.resume();
+                setIsPlaying(true);
+                const now = Tone.now();
+                let accumulatedTime = 0;
+                
+                measure.forEach(id => {
+                    playPercussion(id, now + accumulatedTime);
+                    const note = RHYTHM_NOTES.find(n => n.id === id);
+                    accumulatedTime += (note.beats * 0.5); 
+                });
+
+                setTimeout(() => setIsPlaying(false), accumulatedTime * 1000);
+            };
+
+            // Auto-Play on Correct
+            useEffect(() => {
+                if (isCorrect) {
+                    const timer = setTimeout(() => {
+                        playSequence();
+                    }, 500);
+                    return () => clearTimeout(timer);
+                }
+            }, [isCorrect]);
+
+            const handleAddNote = (noteId) => {
+                if (currentTotal >= 4) return;
+                setMeasure([...measure, noteId]);
+                playPercussion(noteId);
+            };
+
+            const handleRemoveNote = () => {
+                setMeasure(measure.slice(0, -1));
+            };
+
+            const nextStage = () => {
+                if (stage + 1 < RHYTHM_CHALLENGES.length) {
+                    setStage(stage + 1);
+                    setMeasure([]);
+                } else {
+                    onComplete('rhythm-1');
+                }
+            };
+
+            return (
+                <div className="w-full max-w-4xl mx-auto animate-popIn">
+                    <div className="flex justify-between items-center mb-6">
+                        <button onClick={onExit} className="text-gray-500 hover:text-sage-dark font-bold flex items-center gap-1">← Dashboard</button>
+                        <h2 className="text-2xl text-sage-dark handwritten">Module 6: Rhythm Builder</h2>
+                        <div className="text-xs font-bold bg-gray-200 px-3 py-1 rounded-full text-gray-500">Challenge {stage + 1}</div>
+                    </div>
+
+                    <div className="bg-white rounded-3xl shadow-soft p-6 md:p-8 border border-gray-100">
+                        <div className="text-center mb-8">
+                            <h3 className="text-2xl text-gray-700 font-bold mb-1">{challenge.name}</h3>
+                            <p className="text-gray-500 italic">{challenge.hint}</p>
+                        </div>
+
+                        {/* Measure Visualization */}
+                        <div className="mb-8 relative h-32 bg-paper border-2 border-gray-800 rounded-xl flex items-center px-4 overflow-hidden">
+                            {/* Notes */}
+                            <div className="flex items-center gap-1 z-10 w-full">
+                                {measure.map((id, i) => {
+                                    const note = RHYTHM_NOTES.find(n => n.id === id);
+                                    const widthPct = (note.beats / 4) * 100;
+                                    return (
+                                        <div key={i} style={{ width: `${widthPct}%` }} className="h-24 bg-sage/20 border border-sage rounded-lg flex items-center justify-center text-sage-dark animate-popIn relative">
+                                            {/* Increased size for measure view, with line */}
+                                            <VexRhythmNote duration={id} width={80} height={100} drawLine={true} />
+                                            <span className="absolute bottom-1 text-[10px] font-bold text-gray-500">{note.beats} beat</span>
+                                        </div>
+                                    );
+                                })}
+                                {/* Ghost space */}
+                                {4 - currentTotal > 0 && (
+                                    <div style={{ width: `${((4 - currentTotal)/4)*100}%` }} className="h-24 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center text-gray-300 font-bold bg-gray-50">
+                                        {4 - currentTotal} beats left
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Controls */}
+                        <div className="flex justify-center gap-4 mb-8">
+                            {RHYTHM_NOTES.map((n) => (
+                                <button 
+                                    key={n.id}
+                                    onClick={() => handleAddNote(n.id)}
+                                    disabled={currentTotal + n.beats > 4}
+                                    className="flex flex-col items-center justify-center w-20 h-24 bg-white border-2 border-clay rounded-xl shadow-sm hover:shadow-md hover:-translate-y-1 transition-all disabled:opacity-30 disabled:translate-y-0 active:scale-95"
+                                >
+                                    {/* Smaller size for buttons */}
+                                    <VexRhythmNote duration={n.id} width={50} height={60} />
+                                    <span className="text-xs font-bold text-gray-500 -mt-2">{n.name}</span>
+                                </button>
+                            ))}
+                            <button onClick={handleRemoveNote} disabled={measure.length === 0} className="w-20 h-24 flex items-center justify-center text-red-400 font-bold hover:bg-red-50 rounded-xl">Undo</button>
+                        </div>
+
+                        {/* Feedback & Actions */}
+                        <div className="text-center">
+                            {isCorrect ? (
+                                <div className="animate-popIn">
+                                    <p className="text-green-600 font-bold text-xl mb-4">Measure Complete! 🎵</p>
+                                    <div className="flex justify-center gap-4">
+                                        <button onClick={playSequence} className="px-6 py-3 bg-sage text-white rounded-xl font-bold hover:bg-sage-dark flex items-center gap-2">
+                                            {isPlaying ? "🔊 Playing..." : "▶ Replay"}
+                                        </button>
+                                        <Button onClick={nextStage} variant="clay">Next Challenge</Button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div>
+                                    <p className={`font-bold mb-4 ${isOverflow ? 'text-red-500' : 'text-gray-500'}`}>
+                                        {isOverflow ? "Measure Overflow! Remove a note." : `${currentTotal} / 4 Beats`}
+                                    </p>
+                                    {isFull && !isCorrect && (
+                                        <div className="text-orange-500 font-bold mb-4 animate-popIn">
+                                            Measure is full, but doesn't match the goal. Reset and try again!
+                                            <button onClick={() => setMeasure([])} className="block mx-auto mt-2 text-sm underline text-gray-500">Reset</button>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
+                    </div>
+                </div>
+            );
+        };
+
+        const LevelRhythmEcho = ({ onComplete, onExit }) => {
+            const [stage, setStage] = useState(0);
+            const [measure, setMeasure] = useState([]); 
+            const [isPlaying, setIsPlaying] = useState(false);
+            const [feedback, setFeedback] = useState("Listen to the rhythm, then build it.");
+            const [hasListened, setHasListened] = useState(false);
+            
+            const challenge = ECHO_CHALLENGES[stage];
+            
+            const currentTotal = measure.reduce((sum, id) => {
+                const note = RHYTHM_NOTES.find(n => n.id === id);
+                return sum + (note ? note.beats : 0);
+            }, 0);
+
+            // Check match
+            const isCorrect = measure.length === challenge.sequence.length && measure.every((val, index) => val === challenge.sequence[index]);
+
+            const playPattern = async (pattern) => {
+                if (Tone.context.state !== 'running') await Tone.context.resume();
+                setIsPlaying(true);
+                const now = Tone.now();
+                let accumulatedTime = 0;
+                
+                // Add a lead-in click? Maybe later.
+                
+                pattern.forEach(id => {
+                    playPercussion(id, now + accumulatedTime);
+                    const note = RHYTHM_NOTES.find(n => n.id === id);
+                    accumulatedTime += (note.beats * 0.5); // 120bpm
+                });
+
+                setTimeout(() => setIsPlaying(false), accumulatedTime * 1000);
+            };
+
+            const handlePlayTarget = () => {
+                setHasListened(true);
+                playPattern(challenge.sequence);
+                setFeedback("Now try to build what you heard!");
+            };
+
+            const handlePlayUser = () => {
+                playPattern(measure);
+            };
+
+            const handleAddNote = (noteId) => {
+                if (currentTotal >= 4) return;
+                setMeasure([...measure, noteId]);
+                playPercussion(noteId);
+            };
+
+            const handleRemoveNote = () => {
+                setMeasure(measure.slice(0, -1));
+            };
+
+            const nextStage = () => {
+                if (stage + 1 < ECHO_CHALLENGES.length) {
+                    setStage(stage + 1);
+                    setMeasure([]);
+                    setHasListened(false);
+                    setFeedback("Listen to the rhythm, then build it.");
+                } else {
+                    onComplete('rhythm-echo');
+                }
+            };
+
+            return (
+                <div className="w-full max-w-4xl mx-auto animate-popIn">
+                    <div className="flex justify-between items-center mb-6">
+                        <button onClick={onExit} className="text-gray-500 hover:text-sage-dark font-bold flex items-center gap-1">← Dashboard</button>
+                        <h2 className="text-2xl text-sage-dark handwritten">Module 7: Rhythm Echo</h2>
+                        <div className="text-xs font-bold bg-gray-200 px-3 py-1 rounded-full text-gray-500">Challenge {stage + 1}</div>
+                    </div>
+
+                    <div className="bg-white rounded-3xl shadow-soft p-6 md:p-8 border border-gray-100">
+                        <div className="text-center mb-8">
+                            <h3 className="text-2xl text-gray-700 font-bold mb-4">{challenge.name}</h3>
+                            
+                            <button 
+                                onClick={handlePlayTarget}
+                                disabled={isPlaying}
+                                className="px-8 py-4 bg-sage text-white rounded-2xl font-bold text-lg shadow-lg hover:bg-sage-dark hover:scale-105 transition-all flex items-center gap-3 mx-auto disabled:opacity-50 disabled:scale-100"
+                            >
+                                <span className="text-2xl">🔊</span>
+                                {hasListened ? "Listen Again" : "Listen to Target"}
+                            </button>
+                        </div>
+
+                        {/* Measure Visualization */}
+                        <div className="mb-8 relative h-32 bg-paper border-2 border-gray-800 rounded-xl flex items-center px-4 overflow-hidden">
+                            {/* Notes */}
+                            <div className="flex items-center gap-1 z-10 w-full">
+                                {measure.map((id, i) => {
+                                    const note = RHYTHM_NOTES.find(n => n.id === id);
+                                    const widthPct = (note.beats / 4) * 100;
+                                    return (
+                                        <div key={i} style={{ width: `${widthPct}%` }} className="h-24 bg-sage/20 border border-sage rounded-lg flex items-center justify-center text-sage-dark animate-popIn relative">
+                                            <VexRhythmNote duration={id} width={80} height={100} drawLine={true} />
+                                        </div>
+                                    );
+                                })}
+                                {/* Ghost space */}
+                                {4 - currentTotal > 0 && (
+                                    <div style={{ width: `${((4 - currentTotal)/4)*100}%` }} className="h-24 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center text-gray-300 font-bold bg-gray-50">
+                                        ?
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Controls */}
+                        <div className="flex justify-center gap-4 mb-8">
+                            {RHYTHM_NOTES.map((n) => (
+                                <button 
+                                    key={n.id}
+                                    onClick={() => handleAddNote(n.id)}
+                                    disabled={currentTotal + n.beats > 4}
+                                    className="flex flex-col items-center justify-center w-20 h-24 bg-white border-2 border-clay rounded-xl shadow-sm hover:shadow-md hover:-translate-y-1 transition-all disabled:opacity-30 disabled:translate-y-0 active:scale-95"
+                                >
+                                    <VexRhythmNote duration={n.id} width={50} height={60} />
+                                    <span className="text-xs font-bold text-gray-500 -mt-2">{n.name}</span>
+                                </button>
+                            ))}
+                            <button onClick={handleRemoveNote} disabled={measure.length === 0} className="w-20 h-24 flex items-center justify-center text-red-400 font-bold hover:bg-red-50 rounded-xl">Undo</button>
+                        </div>
+
+                        {/* Feedback & Actions */}
+                        <div className="text-center">
+                            {isCorrect ? (
+                                <div className="animate-popIn bg-green-50 p-4 rounded-xl border border-green-100">
+                                    <p className="text-green-600 font-bold text-xl mb-4">Correct! 🎵</p>
+                                    <Button onClick={nextStage} variant="clay">Next Challenge</Button>
+                                </div>
+                            ) : (
+                                <div>
+                                    <p className="text-gray-500 font-bold mb-4">{feedback}</p>
+                                    {measure.length > 0 && currentTotal === 4 && (
+                                        <button onClick={handlePlayUser} className="text-clay-dark font-bold underline hover:text-clay">
+                                            Preview Your Rhythm
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
+                    </div>
+                </div>
+            );
+        };
+
+        const LevelMeter = ({ onComplete, onExit }) => {
+            const [stage, setStage] = useState(0);
+            const [measure, setMeasure] = useState([]); 
+            const [isPlaying, setIsPlaying] = useState(false);
+            
+            const challenge = METER_CHALLENGES[stage];
+            const targetTotal = challenge.numerator; // 3 or 4
+            
+            const currentTotal = measure.reduce((sum, id) => {
+                const note = RHYTHM_NOTES.find(n => n.id === id);
+                return sum + (note ? note.beats : 0);
+            }, 0);
+
+            const isFull = currentTotal === targetTotal;
+            const isOverflow = currentTotal > targetTotal;
+            
+            const isCorrect = isFull; // For this level, just filling the math is the win condition
+
+            // Auto-Play on Correct
+            useEffect(() => {
+                if (isCorrect) {
+                    const timer = setTimeout(() => {
+                        playSequence();
+                    }, 500);
+                    return () => clearTimeout(timer);
+                }
+            }, [isCorrect]);
+
+            // Reset measure when stage changes
+            useEffect(() => {
+                setMeasure([]);
+            }, [stage]);
+
+            const handleAddNote = (noteId) => {
+                if (currentTotal >= targetTotal) return;
+                setMeasure([...measure, noteId]);
+                playPercussion(noteId, "+0", 0.7); // Standard volume for UI feedback
+            };
+
+            const handleRemoveNote = () => {
+                setMeasure(measure.slice(0, -1));
+            };
+
+            const playSequence = async () => {
+                if (Tone.context.state !== 'running') await Tone.context.resume();
+                setIsPlaying(true);
+                const now = Tone.now();
+                let accumulatedTime = 0;
+                let beatCount = 0;
+                
+                measure.forEach((id, index) => {
+                    // Accent the note if it lands on Beat 1 (time = 0)
+                    // Or simply accent the first note of the array for this simple level
+                    const isDownbeat = accumulatedTime === 0;
+                    const velocity = isDownbeat ? 1.0 : 0.5;
+
+                    playPercussion(id, now + accumulatedTime, velocity);
+                    const note = RHYTHM_NOTES.find(n => n.id === id);
+                    accumulatedTime += (note.beats * 0.5); 
+                });
+
+                setTimeout(() => setIsPlaying(false), accumulatedTime * 1000);
+            };
+
+            const nextStage = () => {
+                if (stage + 1 < METER_CHALLENGES.length) {
+                    setStage(stage + 1);
+                } else {
+                    onComplete('meter');
+                }
+            };
+
+            return (
+                <div className="w-full max-w-4xl mx-auto animate-popIn">
+                    <div className="flex justify-between items-center mb-6">
+                        <button onClick={onExit} className="text-gray-500 hover:text-sage-dark font-bold flex items-center gap-1">← Dashboard</button>
+                        <h2 className="text-2xl text-sage-dark handwritten">Module 8: Time Signatures</h2>
+                        <div className="text-xs font-bold bg-gray-200 px-3 py-1 rounded-full text-gray-500">Challenge {stage + 1}</div>
+                    </div>
+
+                    <div className="bg-white rounded-3xl shadow-soft p-6 md:p-8 border border-gray-100">
+                        <div className="text-center mb-8">
+                            <h3 className="text-2xl text-gray-700 font-bold mb-1">{challenge.name}</h3>
+                            <p className="text-gray-500 italic">{challenge.hint}</p>
+                        </div>
+
+                        {/* Measure Visualization */}
+                        <div className="mb-8 relative h-32 bg-paper border-2 border-gray-800 rounded-xl flex items-center px-6 overflow-hidden transition-all duration-500"
+                             style={{ maxWidth: targetTotal === 3 ? '75%' : '100%', margin: '0 auto' }} // Visually shrink for 3/4
+                        >
+                            {/* Time Sig */}
+                            <TimeSigDisplay numerator={challenge.numerator} />
+
+                            {/* Separator */}
+                            <div className="h-full w-0.5 bg-gray-400 mr-4"></div>
+
+                            {/* Percussion Line */}
+                            <div className="absolute inset-0 flex items-center justify-center opacity-30 pointer-events-none left-16">
+                                <div className="border-b-2 border-black w-full"></div>
+                            </div>
+
+                            {/* Notes */}
+                            <div className="flex items-center gap-1 z-10 w-full">
+                                {measure.map((id, i) => {
+                                    const note = RHYTHM_NOTES.find(n => n.id === id);
+                                    // Calculate width based on target Total (so 3 beats fills the space)
+                                    const widthPct = (note.beats / targetTotal) * 100;
+                                    return (
+                                        <div key={i} style={{ width: `${widthPct}%` }} className="h-24 bg-sage/20 border border-sage rounded-lg flex items-center justify-center text-sage-dark animate-popIn relative">
+                                            <VexRhythmNote duration={id} width={80} height={100} drawLine={true} />
+                                            <span className="absolute bottom-1 text-[10px] font-bold text-gray-500">{note.beats} beat</span>
+                                        </div>
+                                    );
+                                })}
+                                {/* Ghost space */}
+                                {targetTotal - currentTotal > 0 && (
+                                    <div style={{ width: `${((targetTotal - currentTotal)/targetTotal)*100}%` }} className="h-24 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center text-gray-300 font-bold bg-gray-50">
+                                        {targetTotal - currentTotal} beats
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Controls */}
+                        <div className="flex justify-center gap-4 mb-8">
+                            {RHYTHM_NOTES.map((n) => (
+                                <button 
+                                    key={n.id}
+                                    onClick={() => handleAddNote(n.id)}
+                                    disabled={currentTotal + n.beats > targetTotal}
+                                    className="flex flex-col items-center justify-center w-20 h-24 bg-white border-2 border-clay rounded-xl shadow-sm hover:shadow-md hover:-translate-y-1 transition-all disabled:opacity-30 disabled:translate-y-0 active:scale-95"
+                                >
+                                    <VexRhythmNote duration={n.id} width={50} height={60} />
+                                    <span className="text-xs font-bold text-gray-500 -mt-2">{n.name}</span>
+                                </button>
+                            ))}
+                            <button onClick={handleRemoveNote} disabled={measure.length === 0} className="w-20 h-24 flex items-center justify-center text-red-400 font-bold hover:bg-red-50 rounded-xl">Undo</button>
+                        </div>
+
+                        {/* Feedback & Actions */}
+                        <div className="text-center">
+                            {isCorrect ? (
+                                <div className="animate-popIn">
+                                    <p className="text-green-600 font-bold text-xl mb-4">Perfect Measure! 🎵</p>
+                                    <div className="flex justify-center gap-4">
+                                        <button onClick={playSequence} className="px-6 py-3 bg-sage text-white rounded-xl font-bold hover:bg-sage-dark flex items-center gap-2">
+                                            {isPlaying ? "🔊 Playing..." : "▶ Replay"}
+                                        </button>
+                                        <Button onClick={nextStage} variant="clay">Next Challenge</Button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div>
+                                    <p className={`font-bold mb-4 ${isOverflow ? 'text-red-500' : 'text-gray-500'}`}>
+                                        {isOverflow ? "Measure Overflow! Remove a note." : `${currentTotal} / ${targetTotal} Beats`}
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+
+                    </div>
+                </div>
+            );
+        };
+
+        const LevelSolfege = ({ onComplete, onExit }) => {
+            const challenges = useMemo(() => generateSolfegeChallenges(5), []);
+            const [stage, setStage] = useState(0); 
+            const [feedback, setFeedback] = useState("Click the correct step on the ladder.");
+            const [hasWonStage, setHasWonStage] = useState(false);
+            const [showLabels, setShowLabels] = useState(true); 
+            const challenge = challenges[stage];
+            const isFinished = stage >= challenges.length;
+
+            useEffect(() => {
+                if (isFinished) return;
+                setHasWonStage(false);
+                setFeedback(`Find "${challenge.targetLabel}"`);
+                setTimeout(() => playTone(getNoteName(challenge.noteOffset, false) + "4", "4n"), 500);
+            }, [stage, isFinished, challenge]);
+
+            const handleStepClick = (stepId) => {
+                if (hasWonStage) return;
+                const step = SOLFEGE_STEPS.find(s => s.id === stepId);
+                playTone(getNoteName(step.noteOffset, false) + "4", "4n");
+                
+                if (stepId === challenge.targetId) {
+                    setHasWonStage(true);
+                    setFeedback("Correct! 🎉");
+                } else {
+                    setFeedback(`That is ${step.label}. Try again.`);
+                }
+            };
+
+            const nextStage = () => {
+                if (stage + 1 < challenges.length) {
+                    setStage(stage + 1);
+                } else {
+                    onComplete('solfege');
+                }
+            };
+
+            if (isFinished) return null;
+
+            return (
+                <div className="w-full max-w-2xl mx-auto animate-popIn">
+                    <div className="flex justify-between items-center mb-6">
+                        <button onClick={onExit} className="text-gray-500 hover:text-sage-dark font-bold flex items-center gap-1">← Dashboard</button>
+                        <h2 className="text-2xl text-sage-dark handwritten">Module 9: Solfege Ladder</h2>
+                        <div className="text-xs font-bold bg-gray-200 px-3 py-1 rounded-full text-gray-500">Challenge {stage + 1}</div>
+                    </div>
+
+                    <div className="bg-white rounded-3xl shadow-soft p-6 md:p-8 border border-gray-100 flex flex-col items-center">
+                        <div className="text-center mb-8 w-full relative">
+                            <h3 className="text-3xl text-clay-dark mb-2 font-bold">Where is {challenge.targetLabel}?</h3>
+                            <button onClick={() => playTone(getNoteName(challenge.noteOffset, false) + "4", "4n")} className="bg-sage/20 text-sage-dark hover:bg-sage hover:text-white transition-colors px-4 py-1 rounded-full text-sm font-bold flex items-center gap-2 mx-auto">🔊 Hear Note</button>
+                            
+                            {/* Blind Mode Toggle */}
+                            <div className="absolute right-0 top-0 flex items-center gap-2">
+                                <span className="text-xs font-bold text-gray-400 uppercase">Labels</span>
+                                <button 
+                                    onClick={() => setShowLabels(!showLabels)}
+                                    className={`w-10 h-6 rounded-full p-1 transition-colors duration-300 ${showLabels ? 'bg-sage' : 'bg-gray-300'}`}
+                                >
+                                    <div className={`w-4 h-4 rounded-full bg-white shadow-sm transform transition-transform duration-300 ${showLabels ? 'translate-x-4' : 'translate-x-0'}`}></div>
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Ladder Visual */}
+                        <div className="flex flex-col-reverse gap-2 mb-8 w-full max-w-xs">
+                            {SOLFEGE_STEPS.map((step) => (
+                                <button
+                                    key={step.id}
+                                    onClick={() => handleStepClick(step.id)}
+                                    className={`w-full py-3 rounded-xl font-bold transition-transform active:scale-95 shadow-sm border-2 
+                                        ${step.color} 
+                                        ${hasWonStage && step.id === challenge.targetId ? 'ring-4 ring-green-400 scale-105' : 'border-transparent hover:border-gray-300'}
+                                    `}
+                                >
+                                    {/* Show label only if toggle is on OR user has won (reveal) */}
+                                    {showLabels || hasWonStage ? step.label : <span className="opacity-0">.</span>}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className={`p-4 rounded-xl text-center transition-colors duration-300 mb-6 w-full ${hasWonStage ? 'bg-green-100 text-green-800' : 'bg-sand/50 text-gray-600'}`}>
+                            <span className="font-bold text-lg block mb-1">{feedback}</span>
+                        </div>
+
+                        <div className="flex justify-center h-16">
+                            {hasWonStage && (
+                                <Button onClick={nextStage} variant="primary" className="animate-popIn text-lg px-10">Next Challenge →</Button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const LevelMelodicIntervals = ({ onComplete, onExit }) => {
+            const challenges = useMemo(() => generateEarIntervalChallenges(5), []);
+            const [stage, setStage] = useState(0); 
+            const [feedback, setFeedback] = useState("Listen to the interval, then choose the correct name.");
+            const [hasWonStage, setHasWonStage] = useState(false);
+            const [showNotation, setShowNotation] = useState(false);
+            
+            const challenge = challenges[stage];
+            const isFinished = stage >= challenges.length;
+
+            const playInterval = async () => {
+                if (Tone.context.state !== 'running') await Tone.context.resume();
+                const now = Tone.now();
+                const synth = new Tone.PolySynth().toDestination();
+                synth.volume.value = -8;
+                
+                // Play Root
+                const rootNote = `${challenge.rootName}4`;
+                synth.triggerAttackRelease(rootNote, "4n", now);
+                
+                // Play Target
+                const targetAbs = challenge.rootIndex + challenge.targetInterval;
+                const targetOctave = 4 + Math.floor(targetAbs / 12);
+                const targetNoteName = getNoteName(targetAbs % 12, false);
+                const targetNote = `${targetNoteName}${targetOctave}`;
+                
+                synth.triggerAttackRelease(targetNote, "4n", now + 0.6);
+            };
+
+            // Initial Play
+            useEffect(() => {
+                if (isFinished) return;
+                setHasWonStage(false);
+                setShowNotation(false);
+                setFeedback("Listen carefully...");
+                setTimeout(() => playInterval(), 500);
+            }, [stage, isFinished, challenge]);
+
+            const handleGuess = (semitones) => {
+                if (hasWonStage) return;
+                
+                if (semitones === challenge.targetInterval) {
+                    setHasWonStage(true);
+                    setShowNotation(true);
+                    setFeedback(`Correct! That is a ${challenge.targetLabel}. Hint: ${challenge.hint}`);
+                    playInterval(); // Replay for reinforcement
+                } else {
+                    setFeedback("Not quite. Listen again and try a different interval.");
+                    playInterval();
+                }
+            };
+
+            const nextStage = () => {
+                if (stage + 1 < challenges.length) {
+                    setStage(stage + 1);
+                } else {
+                    onComplete('intervals-ear');
+                }
+            };
+
+            // Notes for Notation Display (revealed on win)
+            const getNotationNotes = () => {
+                const rootNote = { note: challenge.rootName, octave: 4, index: challenge.rootIndex, fullName: `${challenge.rootName}4`, isRoot: true };
+                
+                if (!showNotation) return [rootNote]; // Show only root initially? Or hide all? Let's show root.
+                
+                const targetAbs = challenge.rootIndex + challenge.targetInterval;
+                const targetOctave = 4 + Math.floor(targetAbs / 12);
+                const targetNoteName = getNoteName(targetAbs % 12, false);
+                
+                return [
+                    rootNote, 
+                    { note: targetNoteName, octave: targetOctave, index: targetAbs % 12, fullName: `${targetNoteName}${targetOctave}`, isRoot: false }
+                ];
+            };
+
+            if (isFinished) return null;
+
+            return (
+                <div className="w-full max-w-2xl mx-auto animate-popIn">
+                    <div className="flex justify-between items-center mb-6">
+                        <button onClick={onExit} className="text-gray-500 hover:text-sage-dark font-bold flex items-center gap-1">← Dashboard</button>
+                        <h2 className="text-2xl text-sage-dark handwritten">Module 10: Ear Training</h2>
+                        <div className="text-xs font-bold bg-gray-200 px-3 py-1 rounded-full text-gray-500">Challenge {stage + 1}</div>
+                    </div>
+
+                    <div className="bg-white rounded-3xl shadow-soft p-6 md:p-8 border border-gray-100">
+                        <div className="text-center mb-8">
+                            <button 
+                                onClick={playInterval}
+                                className="w-24 h-24 bg-gradient-to-br from-indigo-400 to-purple-500 rounded-full flex items-center justify-center shadow-lg hover:scale-105 transition-transform mx-auto mb-4 text-4xl text-white"
+                            >
+                                🔊
+                            </button>
+                            <p className="text-gray-500 italic">Press to hear the interval again.</p>
+                        </div>
+
+                        {/* Optional Visual Aid (Staff) */}
+                        <div className="mb-8 flex flex-col items-center justify-center min-h-[120px] bg-paper rounded-xl border-2 border-dashed border-gray-200 relative overflow-hidden transition-all duration-500">
+                            <div className={`transition-opacity duration-500 ${showNotation ? 'opacity-100' : 'opacity-50 blur-sm'}`}>
+                                <NotationDisplay notes={getNotationNotes()} />
+                            </div>
+                            {!showNotation && <div className="absolute inset-0 flex items-center justify-center font-bold text-gray-400 uppercase tracking-widest">Hidden</div>}
+                        </div>
+
+                        {/* Options */}
+                        <div className="grid grid-cols-2 gap-4 mb-6">
+                            {EAR_INTERVAL_TYPES.map((type) => (
+                                <button
+                                    key={type.label}
+                                    onClick={() => handleGuess(type.semitones)}
+                                    disabled={hasWonStage}
+                                    className={`py-4 rounded-xl font-bold border-2 transition-all shadow-sm
+                                        ${hasWonStage && type.semitones === challenge.targetInterval 
+                                            ? 'bg-green-100 border-green-500 text-green-700 scale-105' 
+                                            : 'bg-white border-gray-200 hover:border-indigo-400 text-gray-600 hover:text-indigo-600'}
+                                    `}
+                                >
+                                    {type.label}
+                                    {/* Show Hint only after winning or maybe if they struggle? Let's show on win for reinforcement */}
+                                    {hasWonStage && type.semitones === challenge.targetInterval && (
+                                        <span className="block text-xs font-normal mt-1 opacity-75">{type.hint}</span>
+                                    )}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className={`p-4 rounded-xl text-center transition-colors duration-300 mb-6 ${hasWonStage ? 'bg-green-100 text-green-800' : 'bg-sand/50 text-gray-600'}`}>
+                            <span className="font-bold text-lg block mb-1">{feedback}</span>
+                        </div>
+
+                        <div className="flex justify-center h-16">
+                            {hasWonStage && (
+                                <Button onClick={nextStage} variant="primary" className="animate-popIn text-lg px-10">Next Challenge →</Button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const LevelNoteHunter = ({ onComplete, onExit }) => {
+            const challenges = useMemo(() => generateNoteReadingChallenges(5), []);
+            const [stage, setStage] = useState(0); 
+            const [feedback, setFeedback] = useState("Find this note on the piano.");
+            const [hasWonStage, setHasWonStage] = useState(false);
+            
+            const [displayNote, setDisplayNote] = useState([]); 
+            const [pressedNote, setPressedNote] = useState(null); 
+            
+            const challenge = challenges[stage];
+            const isFinished = stage >= challenges.length;
+
+            useEffect(() => {
+                if (isFinished) return;
+                setHasWonStage(false);
+                setPressedNote(null);
+                setFeedback(`Level ${stage + 1}: ${challenge.levelName}. ${challenge.hint}`);
+                
+                // Show note on staff (random octave target)
+                setDisplayNote([{
+                    note: challenge.noteName,
+                    octave: challenge.octave,
+                    index: challenge.targetPitchClass, // 0-11
+                    fullName: `${challenge.noteName}${challenge.octave}`,
+                    isRoot: false // Standard notation color
+                }]);
+                
+            }, [stage, isFinished, challenge]);
+
+            const handleNoteClick = (noteInfo) => {
+                if (hasWonStage || isFinished) return;
+                
+                // Normalize inputs to Pitch Class (0-11)
+                const clickedPitchClass = noteInfo.absIndex % 12;
+                const targetPitchClass = challenge.targetPitchClass;
+                
+                // Determine correctness (Octave Agnostic)
+                const isCorrect = clickedPitchClass === targetPitchClass;
+
+                // Visual Feedback on Piano
+                setPressedNote([{
+                    note: noteInfo.name,
+                    octave: noteInfo.octave,
+                    index: clickedPitchClass,
+                    fullName: `${noteInfo.name}${noteInfo.octave}`,
+                    isRoot: isCorrect, // Green if correct
+                    isError: !isCorrect // Red if wrong
+                }]);
+
+                // Play sound
+                playTone(`${noteInfo.name}${noteInfo.octave}`, "8n");
+
+                if (isCorrect) {
+                    setHasWonStage(true);
+                    setFeedback(`Correct! That is a ${challenge.noteName}.`);
+                } else {
+                    setFeedback(`That is a ${noteInfo.name}. Look for ${challenge.noteName}.`);
+                }
+            };
+
+            const nextStage = () => {
+                if (stage + 1 < challenges.length) {
+                    setStage(stage + 1);
+                } else {
+                    onComplete('note-hunter');
+                }
+            };
+
+            if (isFinished) return null;
+
+            return (
+                <div className="w-full max-w-4xl mx-auto animate-popIn">
+                    <div className="flex justify-between items-center mb-6">
+                        <button onClick={onExit} className="text-gray-500 hover:text-sage-dark font-bold flex items-center gap-1">← Dashboard</button>
+                        <h2 className="text-2xl text-sage-dark handwritten">Module 11: Note Hunter</h2>
+                        <div className="text-xs font-bold bg-gray-200 px-3 py-1 rounded-full text-gray-500">Challenge {stage + 1}</div>
+                    </div>
+
+                    <div className="bg-white rounded-3xl shadow-soft p-6 md:p-8 border border-gray-100">
+                        <div className="text-center mb-8">
+                            <h3 className="text-2xl text-gray-700 font-bold mb-1">{challenge.levelName}</h3>
+                            <p className="text-gray-500 italic">{feedback}</p>
+                        </div>
+
+                        <div className="mb-8 flex flex-col items-center justify-center min-h-[160px] bg-paper rounded-xl border-2 border-dashed border-gray-200 relative overflow-hidden">
+                            <NotationDisplay notes={displayNote} />
+                        </div>
+
+                        <div className="mb-8">
+                            {/* Pass showLabels from challenge data */}
+                            <Piano 
+                                activeNotes={pressedNote || []} 
+                                playNote={() => {}} // We handle play in onNoteClick
+                                onNoteClick={handleNoteClick} 
+                                useFlats={challenge.useFlats}
+                                showLabels={challenge.showLabels}
+                            />
+                        </div>
+
+                        <div className={`p-4 rounded-xl text-center transition-colors duration-300 mb-6 ${hasWonStage ? 'bg-green-100 text-green-800' : 'bg-sand/50 text-gray-600'}`}>
+                            <span className="font-bold text-lg block mb-1">{hasWonStage ? "Well Done!" : "Match the Note"}</span>
+                        </div>
+
+                        <div className="flex justify-center h-16">
+                            {hasWonStage && (
+                                <Button onClick={nextStage} variant="primary" className="animate-popIn text-lg px-10">Next Challenge →</Button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const LevelVisualIntervals = ({ onComplete, onExit }) => {
+            const challenges = useMemo(() => generateVisualIntervalChallenges(5), []);
+            const [stage, setStage] = useState(0); 
+            const [feedback, setFeedback] = useState("Look at the distance between the notes.");
+            const [hasWonStage, setHasWonStage] = useState(false);
+            const challenge = challenges[stage];
+            const isFinished = stage >= challenges.length;
+
+            useEffect(() => {
+                if (isFinished) return;
+                setHasWonStage(false);
+                setFeedback(`Find the Interval`);
+            }, [stage, isFinished, challenge]);
+
+            const handleGuess = (interval) => {
+                if (hasWonStage) return;
+                if (interval === challenge.type.interval) {
+                    setHasWonStage(true);
+                    setFeedback(`Correct! That is a ${challenge.type.label}.`);
+                } else {
+                    setFeedback("Not quite. Count the lines and spaces.");
+                }
+            };
+
+            const nextStage = () => {
+                if (stage + 1 < challenges.length) {
+                    setStage(stage + 1);
+                } else {
+                    onComplete('intervals-eye');
+                }
+            };
+
+            if (isFinished) return null;
+
+            return (
+                <div className="w-full max-w-2xl mx-auto animate-popIn">
+                    <div className="flex justify-between items-center mb-6">
+                        <button onClick={onExit} className="text-gray-500 hover:text-sage-dark font-bold flex items-center gap-1">← Dashboard</button>
+                        <h2 className="text-2xl text-sage-dark handwritten">Module 12: Interval Eyes</h2>
+                        <div className="text-xs font-bold bg-gray-200 px-3 py-1 rounded-full text-gray-500">Challenge {stage + 1}</div>
+                    </div>
+
+                    <div className="bg-white rounded-3xl shadow-soft p-6 md:p-8 border border-gray-100">
+                        <div className="mb-8 flex flex-col items-center justify-center min-h-[160px] bg-paper rounded-xl border-2 border-dashed border-gray-200 relative overflow-hidden">
+                            <NotationDisplay notes={challenge.notes} />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4 mb-6">
+                            {VISUAL_INTERVAL_TYPES.map((type) => (
+                                <button
+                                    key={type.label}
+                                    onClick={() => handleGuess(type.interval)}
+                                    disabled={hasWonStage}
+                                    className={`py-4 rounded-xl font-bold border-2 transition-all shadow-sm
+                                        ${hasWonStage && type.interval === challenge.type.interval 
+                                            ? 'bg-green-100 border-green-500 text-green-700 scale-105' 
+                                            : 'bg-white border-gray-200 hover:border-indigo-400 text-gray-600 hover:text-indigo-600'}
+                                    `}
+                                >
+                                    {type.label}
+                                    {hasWonStage && type.interval === challenge.type.interval && (
+                                        <span className="block text-xs font-normal mt-1 opacity-75">{type.hint}</span>
+                                    )}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className={`p-4 rounded-xl text-center transition-colors duration-300 mb-6 ${hasWonStage ? 'bg-green-100 text-green-800' : 'bg-sand/50 text-gray-600'}`}>
+                            <span className="font-bold text-lg block mb-1">{feedback}</span>
+                        </div>
+
+                        <div className="flex justify-center h-16">
+                            {hasWonStage && (
+                                <Button onClick={nextStage} variant="primary" className="animate-popIn text-lg px-10">Next Challenge →</Button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const LevelKeyDecoder = ({ onComplete, onExit }) => {
+            const challenges = useMemo(() => generateKeySigChallenges(5), []);
+            const [stage, setStage] = useState(0); 
+            const [feedback, setFeedback] = useState("Identify the Major Key.");
+            const [hasWonStage, setHasWonStage] = useState(false);
+            const challenge = challenges[stage];
+            const isFinished = stage >= challenges.length;
+
+            useEffect(() => {
+                if (isFinished) return;
+                setHasWonStage(false);
+                setFeedback("What Key is this?");
+            }, [stage, isFinished, challenge]);
+
+            const handleGuess = (keyName) => {
+                if (hasWonStage) return;
+                if (keyName === challenge.name) {
+                    setHasWonStage(true);
+                    setFeedback(`Correct! It's ${challenge.name} Major.`);
+                } else {
+                    setFeedback("Incorrect. Look at the sharps or flats.");
+                }
+            };
+
+            const nextStage = () => {
+                if (stage + 1 < challenges.length) {
+                    setStage(stage + 1);
+                } else {
+                    onComplete('key-decoder');
+                }
+            };
+
+            // Generate options (Correct + 3 random distinct distractors)
+            const options = useMemo(() => {
+                if (isFinished) return [];
+                const distinctRoots = AVAILABLE_ROOTS.filter(r => r.name !== challenge.name);
+                const distractors = [];
+                while(distractors.length < 3) {
+                    const r = distinctRoots[Math.floor(Math.random() * distinctRoots.length)];
+                    if(!distractors.includes(r)) distractors.push(r);
+                }
+                return [challenge, ...distractors].sort(() => Math.random() - 0.5);
+            }, [challenge, isFinished]);
+
+            if (isFinished) return null;
+
+            return (
+                <div className="w-full max-w-2xl mx-auto animate-popIn">
+                    <div className="flex justify-between items-center mb-6">
+                        <button onClick={onExit} className="text-gray-500 hover:text-sage-dark font-bold flex items-center gap-1">← Dashboard</button>
+                        <h2 className="text-2xl text-sage-dark handwritten">Module 13: Key Decoder</h2>
+                        <div className="text-xs font-bold bg-gray-200 px-3 py-1 rounded-full text-gray-500">Challenge {stage + 1}</div>
+                    </div>
+
+                    <div className="bg-white rounded-3xl shadow-soft p-6 md:p-8 border border-gray-100">
+                        <div className="mb-8 flex flex-col items-center justify-center min-h-[160px] bg-paper rounded-xl border-2 border-dashed border-gray-200 relative overflow-hidden">
+                            <NotationDisplay keySignature={challenge.name} />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4 mb-6">
+                            {options.map((opt) => (
+                                <button
+                                    key={opt.name}
+                                    onClick={() => handleGuess(opt.name)}
+                                    disabled={hasWonStage}
+                                    className={`py-4 rounded-xl font-bold border-2 transition-all shadow-sm
+                                        ${hasWonStage && opt.name === challenge.name 
+                                            ? 'bg-green-100 border-green-500 text-green-700 scale-105' 
+                                            : 'bg-white border-gray-200 hover:border-indigo-400 text-gray-600 hover:text-indigo-600'}
+                                    `}
+                                >
+                                    {opt.name} Major
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className={`p-4 rounded-xl text-center transition-colors duration-300 mb-6 ${hasWonStage ? 'bg-green-100 text-green-800' : 'bg-sand/50 text-gray-600'}`}>
+                            <span className="font-bold text-lg block mb-1">{feedback}</span>
+                        </div>
+
+                        <div className="flex justify-center h-16">
+                            {hasWonStage && (
+                                <Button onClick={nextStage} variant="primary" className="animate-popIn text-lg px-10">Next Challenge →</Button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const Dashboard = ({ progress, onSelectLevel, onReset }) => {
+            return (
+                <div className="max-w-5xl mx-auto py-10 px-4 animate-popIn">
+                    <header className="text-center mb-12">
+                        <h1 className="text-5xl text-sage-dark mb-4">Organic Music Theory</h1>
+                        <p className="text-xl text-gray-500 handwritten">Practical theory for hands-on musicians.</p>
+                    </header>
+
+                    {/* Series 1: Harmony */}
+                    <div className="mb-12">
+                        <h2 className="text-gray-400 font-bold uppercase tracking-widest text-sm mb-6 flex items-center gap-2">
+                            <span className="w-8 h-[2px] bg-gray-300"></span>
+                            Series 1: Harmony
+                            <span className="flex-1 h-[2px] bg-gray-300"></span>
+                        </h2>
+                        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {/* Modules 1-5 Cards */}
+                            <div onClick={() => onSelectLevel('level-1')} className="bg-white p-6 rounded-2xl shadow-sm border-2 border-transparent hover:border-sage cursor-pointer transition-all hover:shadow-md group">
+                                <div className="flex justify-between items-start mb-4"><span className="bg-sage/20 text-sage-dark px-3 py-1 rounded-full text-xs font-bold uppercase">Module 1</span>{progress['major-scale'] && <span className="text-green-500 text-xl">✓</span>}</div>
+                                <h3 className="text-xl font-bold text-gray-800 mb-2 group-hover:text-sage-dark">The Major Scale</h3>
+                                <p className="text-gray-500 text-sm">Learn the DNA of Western music.</p>
+                            </div>
+                            <div onClick={() => onSelectLevel('level-2')} className={`bg-white p-6 rounded-2xl shadow-sm border-2 border-transparent hover:border-clay cursor-pointer transition-all hover:shadow-md group ${!progress['major-scale'] && !TEACHER_MODE ? 'opacity-50 pointer-events-none' : ''}`}>
+                                <div className="flex justify-between items-start mb-4"><span className="bg-clay/20 text-clay-dark px-3 py-1 rounded-full text-xs font-bold uppercase">Module 2</span>{progress['degrees'] && <span className="text-green-500 text-xl">✓</span>}</div>
+                                <h3 className="text-xl font-bold text-gray-800 mb-2 group-hover:text-clay-dark">Intervals</h3>
+                                <p className="text-gray-500 text-sm">Train your ear to find the 3rd and 5th.</p>
+                            </div>
+                            <div onClick={() => onSelectLevel('level-3')} className={`bg-white p-6 rounded-2xl shadow-sm border-2 border-transparent hover:border-yellow-500 cursor-pointer transition-all hover:shadow-md group ${!progress['degrees'] && !TEACHER_MODE ? 'opacity-50 pointer-events-none' : ''}`}>
+                                <div className="flex justify-between items-start mb-4"><span className="bg-yellow-100 text-yellow-600 px-3 py-1 rounded-full text-xs font-bold uppercase">Module 3</span>{progress['triads'] && <span className="text-green-500 text-xl">✓</span>}</div>
+                                <h3 className="text-xl font-bold text-gray-800 mb-2 group-hover:text-yellow-600">Triads</h3>
+                                <p className="text-gray-500 text-sm">Build Major and Minor chords.</p>
+                            </div>
+                            <div onClick={() => onSelectLevel('level-4')} className={`bg-white p-6 rounded-2xl shadow-sm border-2 border-transparent hover:border-indigo-500 cursor-pointer transition-all hover:shadow-md group ${!progress['triads'] && !TEACHER_MODE ? 'opacity-50 pointer-events-none' : ''}`}>
+                                <div className="flex justify-between items-start mb-4"><span className="bg-indigo-100 text-indigo-600 px-3 py-1 rounded-full text-xs font-bold uppercase">Module 4</span>{progress['diatonic'] && <span className="text-green-500 text-xl">✓</span>}</div>
+                                <h3 className="text-xl font-bold text-gray-800 mb-2 group-hover:text-indigo-600">Key Chords</h3>
+                                <p className="text-gray-500 text-sm">The Harmonized Scale.</p>
+                            </div>
+                            <div onClick={() => onSelectLevel('level-5')} className={`bg-white p-6 rounded-2xl shadow-sm border-2 border-transparent hover:border-pink-500 cursor-pointer transition-all hover:shadow-md group ${!progress['diatonic'] && !TEACHER_MODE ? 'opacity-50 pointer-events-none' : ''}`}>
+                                <div className="flex justify-between items-start mb-4"><span className="bg-pink-100 text-pink-600 px-3 py-1 rounded-full text-xs font-bold uppercase">Module 5</span>{progress['progression'] && <span className="text-green-500 text-xl">✓</span>}</div>
+                                <h3 className="text-xl font-bold text-gray-800 mb-2 group-hover:text-pink-600">Progression Lab</h3>
+                                <p className="text-gray-500 text-sm">Songwriting blocks.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Series 2: Rhythm */}
+                    <div className="mb-12">
+                        <h2 className="text-gray-400 font-bold uppercase tracking-widest text-sm mb-6 flex items-center gap-2">
+                            <span className="w-8 h-[2px] bg-gray-300"></span>
+                            Series 2: Rhythm
+                            <span className="flex-1 h-[2px] bg-gray-300"></span>
+                        </h2>
+                        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            <div onClick={() => onSelectLevel('level-6')} className={`bg-white p-6 rounded-2xl shadow-sm border-2 border-transparent hover:border-teal-500 cursor-pointer transition-all hover:shadow-md group ${!progress['progression'] && !TEACHER_MODE ? 'opacity-50 pointer-events-none' : ''}`}>
+                                <div className="flex justify-between items-start mb-4"><span className="bg-teal-100 text-teal-600 px-3 py-1 rounded-full text-xs font-bold uppercase">Module 6</span>{progress['rhythm-1'] && <span className="text-green-500 text-xl">✓</span>}</div>
+                                <h3 className="text-xl font-bold text-gray-800 mb-2 group-hover:text-teal-600">Rhythm Builder</h3>
+                                <p className="text-gray-500 text-sm">Visualize time. Whole, Half, and Quarter notes.</p>
+                                {!progress['progression'] && !TEACHER_MODE && (
+                                    <div className="absolute inset-0 bg-white/50 flex items-center justify-center backdrop-blur-[1px]"><span className="text-xs font-bold text-gray-500 bg-white px-3 py-1 rounded-full shadow-sm">Finish Harmony First</span></div>
+                                )}
+                            </div>
+                            <div onClick={() => onSelectLevel('level-7')} className={`bg-white p-6 rounded-2xl shadow-sm border-2 border-transparent hover:border-orange-500 cursor-pointer transition-all hover:shadow-md group ${!progress['rhythm-1'] && !TEACHER_MODE ? 'opacity-50 pointer-events-none' : ''}`}>
+                                <div className="flex justify-between items-start mb-4"><span className="bg-orange-100 text-orange-600 px-3 py-1 rounded-full text-xs font-bold uppercase">Module 7</span>{progress['rhythm-echo'] && <span className="text-green-500 text-xl">✓</span>}</div>
+                                <h3 className="text-xl font-bold text-gray-800 mb-2 group-hover:text-orange-600">Rhythm Echo</h3>
+                                <p className="text-gray-500 text-sm">Dictation practice. Listen and transcribe.</p>
+                                {!progress['rhythm-1'] && !TEACHER_MODE && (
+                                    <div className="absolute inset-0 bg-white/50 flex items-center justify-center backdrop-blur-[1px]"><span className="text-xs font-bold text-gray-500 bg-white px-3 py-1 rounded-full shadow-sm">Complete Module 6 First</span></div>
+                                )}
+                            </div>
+                            <div onClick={() => onSelectLevel('level-8')} className={`bg-white p-6 rounded-2xl shadow-sm border-2 border-transparent hover:border-blue-500 cursor-pointer transition-all hover:shadow-md group ${!progress['rhythm-echo'] && !TEACHER_MODE ? 'opacity-50 pointer-events-none' : ''}`}>
+                                <div className="flex justify-between items-start mb-4"><span className="bg-blue-100 text-blue-600 px-3 py-1 rounded-full text-xs font-bold uppercase">Module 8</span>{progress['meter'] && <span className="text-green-500 text-xl">✓</span>}</div>
+                                <h3 className="text-xl font-bold text-gray-800 mb-2 group-hover:text-blue-600">Time Signatures</h3>
+                                <p className="text-gray-500 text-sm">Count to 3 or 4. Feel the pulse.</p>
+                                {!progress['rhythm-echo'] && !TEACHER_MODE && (
+                                    <div className="absolute inset-0 bg-white/50 flex items-center justify-center backdrop-blur-[1px]"><span className="text-xs font-bold text-gray-500 bg-white px-3 py-1 rounded-full shadow-sm">Complete Module 7 First</span></div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Series 3: Melody */}
+                    <div className="mb-12">
+                        <h2 className="text-gray-400 font-bold uppercase tracking-widest text-sm mb-6 flex items-center gap-2">
+                            <span className="w-8 h-[2px] bg-gray-300"></span>
+                            Series 3: Melody
+                            <span className="flex-1 h-[2px] bg-gray-300"></span>
+                        </h2>
+                        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            <div onClick={() => onSelectLevel('level-9')} className={`bg-white p-6 rounded-2xl shadow-sm border-2 border-transparent hover:border-red-500 cursor-pointer transition-all hover:shadow-md group ${!progress['meter'] && !TEACHER_MODE ? 'opacity-50 pointer-events-none' : ''}`}>
+                                <div className="flex justify-between items-start mb-4"><span className="bg-red-100 text-red-600 px-3 py-1 rounded-full text-xs font-bold uppercase">Module 9</span>{progress['solfege'] && <span className="text-green-500 text-xl">✓</span>}</div>
+                                <h3 className="text-xl font-bold text-gray-800 mb-2 group-hover:text-red-600">Solfege Ladder</h3>
+                                <p className="text-gray-500 text-sm">Do Re Mi. Learn the function of each note.</p>
+                                {!progress['meter'] && !TEACHER_MODE && (
+                                    <div className="absolute inset-0 bg-white/50 flex items-center justify-center backdrop-blur-[1px]"><span className="text-xs font-bold text-gray-500 bg-white px-3 py-1 rounded-full shadow-sm">Complete Rhythm First</span></div>
+                                )}
+                            </div>
+                            <div onClick={() => onSelectLevel('level-10')} className={`bg-white p-6 rounded-2xl shadow-sm border-2 border-transparent hover:border-indigo-500 cursor-pointer transition-all hover:shadow-md group ${!progress['solfege'] && !TEACHER_MODE ? 'opacity-50 pointer-events-none' : ''}`}>
+                                <div className="flex justify-between items-start mb-4"><span className="bg-indigo-100 text-indigo-600 px-3 py-1 rounded-full text-xs font-bold uppercase">Module 10</span>{progress['intervals-ear'] && <span className="text-green-500 text-xl">✓</span>}</div>
+                                <h3 className="text-xl font-bold text-gray-800 mb-2 group-hover:text-indigo-600">Interval Ear Training</h3>
+                                <p className="text-gray-500 text-sm">Train your ear to recognize the distance between notes.</p>
+                                {!progress['solfege'] && !TEACHER_MODE && (
+                                    <div className="absolute inset-0 bg-white/50 flex items-center justify-center backdrop-blur-[1px]"><span className="text-xs font-bold text-gray-500 bg-white px-3 py-1 rounded-full shadow-sm">Complete Module 9 First</span></div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Series 4: Notation */}
+                    <div className="mb-12">
+                        <h2 className="text-gray-400 font-bold uppercase tracking-widest text-sm mb-6 flex items-center gap-2">
+                            <span className="w-8 h-[2px] bg-gray-300"></span>
+                            Series 4: Notation
+                            <span className="flex-1 h-[2px] bg-gray-300"></span>
+                        </h2>
+                        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            <div onClick={() => onSelectLevel('level-11')} className={`bg-white p-6 rounded-2xl shadow-sm border-2 border-transparent hover:border-cyan-500 cursor-pointer transition-all hover:shadow-md group ${!progress['intervals-ear'] && !TEACHER_MODE ? 'opacity-50 pointer-events-none' : ''}`}>
+                                <div className="flex justify-between items-start mb-4"><span className="bg-cyan-100 text-cyan-600 px-3 py-1 rounded-full text-xs font-bold uppercase">Module 11</span>{progress['note-hunter'] && <span className="text-green-500 text-xl">✓</span>}</div>
+                                <h3 className="text-xl font-bold text-gray-800 mb-2 group-hover:text-cyan-600">Note Hunter</h3>
+                                <p className="text-gray-500 text-sm">Sight Reading. Find the note on the piano.</p>
+                                {!progress['intervals-ear'] && !TEACHER_MODE && (
+                                    <div className="absolute inset-0 bg-white/50 flex items-center justify-center backdrop-blur-[1px]"><span className="text-xs font-bold text-gray-500 bg-white px-3 py-1 rounded-full shadow-sm">Complete Module 10 First</span></div>
+                                )}
+                            </div>
+                            <div onClick={() => onSelectLevel('level-12')} className={`bg-white p-6 rounded-2xl shadow-sm border-2 border-transparent hover:border-lime-500 cursor-pointer transition-all hover:shadow-md group ${!progress['note-hunter'] && !TEACHER_MODE ? 'opacity-50 pointer-events-none' : ''}`}>
+                                <div className="flex justify-between items-start mb-4"><span className="bg-lime-100 text-lime-600 px-3 py-1 rounded-full text-xs font-bold uppercase">Module 12</span>{progress['intervals-eye'] && <span className="text-green-500 text-xl">✓</span>}</div>
+                                <h3 className="text-xl font-bold text-gray-800 mb-2 group-hover:text-lime-600">Interval Eyes</h3>
+                                <p className="text-gray-500 text-sm">Read the distance between notes visually.</p>
+                                {!progress['note-hunter'] && !TEACHER_MODE && (
+                                    <div className="absolute inset-0 bg-white/50 flex items-center justify-center backdrop-blur-[1px]"><span className="text-xs font-bold text-gray-500 bg-white px-3 py-1 rounded-full shadow-sm">Complete Module 11 First</span></div>
+                                )}
+                            </div>
+                            <div onClick={() => onSelectLevel('level-13')} className={`bg-white p-6 rounded-2xl shadow-sm border-2 border-transparent hover:border-fuchsia-500 cursor-pointer transition-all hover:shadow-md group ${!progress['intervals-eye'] && !TEACHER_MODE ? 'opacity-50 pointer-events-none' : ''}`}>
+                                <div className="flex justify-between items-start mb-4"><span className="bg-fuchsia-100 text-fuchsia-600 px-3 py-1 rounded-full text-xs font-bold uppercase">Module 13</span>{progress['key-decoder'] && <span className="text-green-500 text-xl">✓</span>}</div>
+                                <h3 className="text-xl font-bold text-gray-800 mb-2 group-hover:text-fuchsia-600">Key Decoder</h3>
+                                <p className="text-gray-500 text-sm">Identify the key from the signature.</p>
+                                {!progress['intervals-eye'] && !TEACHER_MODE && (
+                                    <div className="absolute inset-0 bg-white/50 flex items-center justify-center backdrop-blur-[1px]"><span className="text-xs font-bold text-gray-500 bg-white px-3 py-1 rounded-full shadow-sm">Complete Module 12 First</span></div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    <footer className="mt-16 text-center">
+                        <Button onClick={onReset} variant="text">Reset All Progress</Button>
+                    </footer>
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [view, setView] = useState('dashboard');
+            const { progress, unlockBadge, resetProgress } = useProgress();
+
+            const handleLevelComplete = (badgeId) => {
+                unlockBadge(badgeId);
+                setView('dashboard');
+            };
+
+            return (
+                <div className="min-h-screen bg-paper">
+                    {view === 'dashboard' && <Dashboard progress={progress} onSelectLevel={(lvl) => { Tone.start(); setView(lvl); }} onReset={resetProgress} />}
+                    {view === 'level-1' && <LevelMajorScale onComplete={handleLevelComplete} onExit={() => setView('dashboard')} />}
+                    {view === 'level-2' && <LevelIntervals onComplete={handleLevelComplete} onExit={() => setView('dashboard')} />}
+                    {view === 'level-3' && <LevelTriads onComplete={handleLevelComplete} onExit={() => setView('dashboard')} />}
+                    {view === 'level-4' && <LevelDiatonic onComplete={handleLevelComplete} onExit={() => setView('dashboard')} />}
+                    {view === 'level-5' && <LevelProgression onComplete={handleLevelComplete} onExit={() => setView('dashboard')} />}
+                    {view === 'level-6' && <div className="py-8 px-4"><LevelRhythm onComplete={handleLevelComplete} onExit={() => setView('dashboard')} /></div>}
+                    {view === 'level-7' && <div className="py-8 px-4"><LevelRhythmEcho onComplete={handleLevelComplete} onExit={() => setView('dashboard')} /></div>}
+                    {view === 'level-8' && <div className="py-8 px-4"><LevelMeter onComplete={handleLevelComplete} onExit={() => setView('dashboard')} /></div>}
+                    {view === 'level-9' && <div className="py-8 px-4"><LevelSolfege onComplete={handleLevelComplete} onExit={() => setView('dashboard')} /></div>}
+                    {view === 'level-10' && <div className="py-8 px-4"><LevelMelodicIntervals onComplete={handleLevelComplete} onExit={() => setView('dashboard')} /></div>}
+                    {view === 'level-11' && <div className="py-8 px-4"><LevelNoteHunter onComplete={handleLevelComplete} onExit={() => setView('dashboard')} /></div>}
+                    {view === 'level-12' && <div className="py-8 px-4"><LevelVisualIntervals onComplete={handleLevelComplete} onExit={() => setView('dashboard')} /></div>}
+                    {view === 'level-13' && <div className="py-8 px-4"><LevelKeyDecoder onComplete={handleLevelComplete} onExit={() => setView('dashboard')} /></div>}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
